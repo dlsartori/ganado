@@ -1,0 +1,13 @@
+Colección de datos: definir variables con los valores para cada campo a ser escrito
+- directos: tomados de los controles de formulario o pantalla
+- calculados: resultado de algún cálculo o ID de un registro creado en una tabla relacionada
+Validación
+- Primary keys (únicos y no nulos)
+- Valores no nulos adicionales
+- Otras reglas
+
+Ingreso: repetir según sea necesario
+- Ingresar registro en tabla/s precedente/s y tomar el ID en una variable
+- Ingresar registro en tabla/s dependiente/s usando el/los ID almacenados
+
+Limpiar: cerrar conexiones y destruir objetos
