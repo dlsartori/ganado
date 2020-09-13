@@ -16,11 +16,66 @@ Salir
 <end node> 5P9i0s8y19Z
 dt=Text
 <node>
+Edición
+1
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+Opciones...
+2
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+Animales
+1
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+Alta...
+2
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+Baja...
+2
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+Sanidad
+1
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+Tratamientos...
+2
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+Actividades Programadas...
+2
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+Caravanas
+1
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+Alta...
+2
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+Baja...
+2
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
 Ayuda
 1
 <end node> 5P9i0s8y19Z
 dt=Text
 <node>
-Acerca de ...
+Acerca de...
 2
 <end node> 5P9i0s8y19Z

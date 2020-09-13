@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>425</width>
+    <height>105</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>MainWindow</string>
+  </property>
+  <widget class="QWidget" name="centralwidget"/>
+  <widget class="QStatusBar" name="statusbar"/>
+  <widget class="QMenuBar" name="menubar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>425</width>
+     <height>21</height>
+    </rect>
+   </property>
+   <widget class="QMenu" name="menuArchivo">
+    <property name="title">
+     <string>&amp;Archivo</string>
+    </property>
+    <addaction name="actionSalir"/>
+   </widget>
+   <widget class="QMenu" name="menuAnimales">
+    <property name="title">
+     <string>A&amp;nimales</string>
+    </property>
+    <addaction name="actionAltaAnimales"/>
+    <addaction name="actionBajaAnimales"/>
+   </widget>
+   <widget class="QMenu" name="menuCravanas">
+    <property name="title">
+     <string>&amp;Caravanas</string>
+    </property>
+    <addaction name="actionAltaCaravanas"/>
+    <addaction name="actionBajaCaravanas"/>
+   </widget>
+   <widget class="QMenu" name="menuSanidad">
+    <property name="title">
+     <string>&amp;Sanidad</string>
+    </property>
+    <addaction name="actionTratamientos"/>
+    <addaction name="actionActividadesProgramadas"/>
+   </widget>
+   <widget class="QMenu" name="menuAyuda">
+    <property name="title">
+     <string>&amp;Ayuda</string>
+    </property>
+    <addaction name="actionAcerca_de"/>
+   </widget>
+   <widget class="QMenu" name="menu_Edici_n">
+    <property name="title">
+     <string>&amp;Edición</string>
+    </property>
+    <addaction name="action_Opciones"/>
+   </widget>
+   <addaction name="menuArchivo"/>
+   <addaction name="menu_Edici_n"/>
+   <addaction name="menuAnimales"/>
+   <addaction name="menuSanidad"/>
+   <addaction name="menuCravanas"/>
+   <addaction name="menuAyuda"/>
+  </widget>
+  <action name="actionSalir">
+   <property name="text">
+    <string>Salir</string>
+   </property>
+  </action>
+  <action name="actionAltaAnimales">
+   <property name="text">
+    <string>Alta...</string>
+   </property>
+  </action>
+  <action name="actionBajaAnimales">
+   <property name="text">
+    <string>Baja...</string>
+   </property>
+  </action>
+  <action name="actionAltaCaravanas">
+   <property name="text">
+    <string>Alta ...</string>
+   </property>
+  </action>
+  <action name="actionBajaCaravanas">
+   <property name="text">
+    <string>Baja ...</string>
+   </property>
+  </action>
+  <action name="actionTratamientos">
+   <property name="text">
+    <string>Tratamientos...</string>
+   </property>
+  </action>
+  <action name="actionActividadesProgramadas">
+   <property name="text">
+    <string>Actividades &amp;Programadas...</string>
+   </property>
+  </action>
+  <action name="actionAcerca_de">
+   <property name="text">
+    <string>&amp;Acerca de</string>
+   </property>
+  </action>
+  <action name="action_Opciones">
+   <property name="text">
+    <string>&amp;Opciones...</string>
+   </property>
+  </action>
+ </widget>
+ <layoutdefault spacing="0" margin="0"/>
+ <resources/>
+ <connections/>
+</ui>
