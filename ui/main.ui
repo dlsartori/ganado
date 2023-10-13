@@ -1,0 +1,410 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="enabled">
+   <bool>true</bool>
+  </property>
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>875</width>
+    <height>492</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Cattle</string>
+  </property>
+  <widget class="QWidget" name="centralwidget"/>
+  <widget class="QMenuBar" name="menubar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>875</width>
+     <height>21</height>
+    </rect>
+   </property>
+   <widget class="QMenu" name="menuFile">
+    <property name="title">
+     <string>&amp;File</string>
+    </property>
+    <addaction name="action_Import"/>
+    <addaction name="action_Export"/>
+    <addaction name="action_Print"/>
+    <addaction name="separator"/>
+    <addaction name="action_Quit"/>
+   </widget>
+   <widget class="QMenu" name="menu_Queries">
+    <property name="title">
+     <string>&amp;Queries</string>
+    </property>
+    <addaction name="action_Animal_Count"/>
+    <addaction name="action_Status"/>
+    <addaction name="action_Localization"/>
+    <addaction name="separator"/>
+    <addaction name="action_Reports"/>
+   </widget>
+   <widget class="QMenu" name="menu_Activities">
+    <property name="title">
+     <string>&amp;Activities</string>
+    </property>
+    <widget class="QMenu" name="menu_Health">
+     <property name="title">
+      <string>&amp;Health</string>
+     </property>
+     <addaction name="action_Application"/>
+     <addaction name="action_Procedure"/>
+     <addaction name="action_Curing"/>
+     <addaction name="action_Vital_Parameters"/>
+     <addaction name="action_Semen_Extraction"/>
+     <addaction name="separator"/>
+     <addaction name="action_Reports_2"/>
+    </widget>
+    <widget class="QMenu" name="menu_Livestock_Management">
+     <property name="title">
+      <string>&amp;Livestock Management</string>
+     </property>
+     <addaction name="action_Inventory"/>
+     <addaction name="action_Status_2"/>
+     <addaction name="action_Castration"/>
+     <addaction name="action_Weaning"/>
+     <addaction name="actionMo_vements"/>
+     <addaction name="actionMil_king"/>
+     <addaction name="separator"/>
+     <addaction name="action_Reports_3"/>
+    </widget>
+    <addaction name="menu_Health"/>
+    <addaction name="menu_Livestock_Management"/>
+    <addaction name="action_Parameter_Setting"/>
+   </widget>
+   <widget class="QMenu" name="menuActivity_Programming">
+    <property name="title">
+     <string>Activity &amp;Programming</string>
+    </property>
+    <addaction name="action_Health_2"/>
+    <addaction name="action_Livestock_Management_2"/>
+    <addaction name="separator"/>
+    <addaction name="action_Reports_4"/>
+   </widget>
+   <widget class="QMenu" name="menu_Money">
+    <property name="title">
+     <string>&amp;Money</string>
+    </property>
+    <addaction name="action_Purchase"/>
+    <addaction name="action_Sale"/>
+    <addaction name="action_Exchange"/>
+    <addaction name="action_Cession"/>
+    <addaction name="separator"/>
+    <addaction name="action_Banks"/>
+    <addaction name="action_People"/>
+    <addaction name="separator"/>
+    <addaction name="actionC_lients"/>
+    <addaction name="action_Suppliers"/>
+    <addaction name="separator"/>
+    <addaction name="action_Reports_5"/>
+   </widget>
+   <widget class="QMenu" name="menu_Notifications">
+    <property name="title">
+     <string>&amp;Notifications</string>
+    </property>
+    <addaction name="action_Import_2"/>
+   </widget>
+   <widget class="QMenu" name="menuPe_rsons">
+    <property name="title">
+     <string>Pe&amp;rsons</string>
+    </property>
+    <addaction name="action_Import_3"/>
+    <addaction name="separator"/>
+    <addaction name="action_Reports_6"/>
+   </widget>
+   <widget class="QMenu" name="menu_System">
+    <property name="title">
+     <string>&amp;System</string>
+    </property>
+    <addaction name="action_Import_4"/>
+   </widget>
+   <widget class="QMenu" name="menu_Modules">
+    <property name="title">
+     <string>Mo&amp;dules</string>
+    </property>
+    <addaction name="action_Bovine"/>
+    <addaction name="action_Caprine"/>
+    <addaction name="action_Ovine"/>
+    <addaction name="action_Porcine"/>
+    <addaction name="action_Equine"/>
+   </widget>
+   <widget class="QMenu" name="menu_Help">
+    <property name="title">
+     <string>&amp;Help</string>
+    </property>
+    <addaction name="action_About"/>
+    <addaction name="separator"/>
+    <addaction name="action_Test_Panel"/>
+   </widget>
+   <addaction name="menuFile"/>
+   <addaction name="menu_Queries"/>
+   <addaction name="menu_Activities"/>
+   <addaction name="menuActivity_Programming"/>
+   <addaction name="menu_Money"/>
+   <addaction name="menu_Notifications"/>
+   <addaction name="menuPe_rsons"/>
+   <addaction name="menu_System"/>
+   <addaction name="menu_Modules"/>
+   <addaction name="menu_Help"/>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+  <action name="action_About">
+   <property name="text">
+    <string>&amp;About...</string>
+   </property>
+  </action>
+  <action name="action_Import">
+   <property name="text">
+    <string>&amp;Import</string>
+   </property>
+  </action>
+  <action name="action_Export">
+   <property name="text">
+    <string>&amp;Export...</string>
+   </property>
+  </action>
+  <action name="action_Print">
+   <property name="text">
+    <string>&amp;Print...</string>
+   </property>
+  </action>
+  <action name="action_Animal_Count">
+   <property name="text">
+    <string>&amp;Animal Count...</string>
+   </property>
+  </action>
+  <action name="action_Status">
+   <property name="text">
+    <string>&amp;Status...</string>
+   </property>
+  </action>
+  <action name="action_Localization">
+   <property name="text">
+    <string>&amp;Localization...</string>
+   </property>
+  </action>
+  <action name="action_Parameter_Setting">
+   <property name="text">
+    <string>&amp;Parameter Setting...</string>
+   </property>
+  </action>
+  <action name="action_Quit">
+   <property name="text">
+    <string>&amp;Quit</string>
+   </property>
+  </action>
+  <action name="action_Reports">
+   <property name="text">
+    <string>&amp;Reports</string>
+   </property>
+  </action>
+  <action name="action_Application">
+   <property name="text">
+    <string>&amp;Application...</string>
+   </property>
+  </action>
+  <action name="action_Procedure">
+   <property name="text">
+    <string>&amp;Procedure...</string>
+   </property>
+  </action>
+  <action name="action_Curing">
+   <property name="text">
+    <string>&amp;Curing...</string>
+   </property>
+  </action>
+  <action name="action_Vital_Parameters">
+   <property name="text">
+    <string>&amp;Vital Parameters...</string>
+   </property>
+  </action>
+  <action name="action_Semen_Extraction">
+   <property name="text">
+    <string>&amp;Semen Extraction...</string>
+   </property>
+  </action>
+  <action name="action_Reports_2">
+   <property name="text">
+    <string>&amp;Reports...</string>
+   </property>
+  </action>
+  <action name="action_Inventory">
+   <property name="text">
+    <string>&amp;Inventory...</string>
+   </property>
+  </action>
+  <action name="action_Status_2">
+   <property name="text">
+    <string>&amp;Status...</string>
+   </property>
+  </action>
+  <action name="action_Castration">
+   <property name="text">
+    <string>&amp;Castration...</string>
+   </property>
+  </action>
+  <action name="action_Weaning">
+   <property name="text">
+    <string>&amp;Weaning...</string>
+   </property>
+  </action>
+  <action name="actionMo_vements">
+   <property name="text">
+    <string>&amp;Movements...</string>
+   </property>
+  </action>
+  <action name="actionMil_king">
+   <property name="text">
+    <string>Mil&amp;king...</string>
+   </property>
+  </action>
+  <action name="action_Reports_3">
+   <property name="text">
+    <string>&amp;Reports...</string>
+   </property>
+  </action>
+  <action name="action_Health_2">
+   <property name="text">
+    <string>&amp;Health...</string>
+   </property>
+  </action>
+  <action name="action_Livestock_Management_2">
+   <property name="text">
+    <string>&amp;Livestock Management...</string>
+   </property>
+  </action>
+  <action name="action_Reports_4">
+   <property name="text">
+    <string>&amp;Reports...</string>
+   </property>
+  </action>
+  <action name="action_Purchase">
+   <property name="text">
+    <string>&amp;Purchase...</string>
+   </property>
+  </action>
+  <action name="action_Sale">
+   <property name="text">
+    <string>&amp;Sale...</string>
+   </property>
+  </action>
+  <action name="action_Exchange">
+   <property name="text">
+    <string>&amp;Exchange...</string>
+   </property>
+  </action>
+  <action name="action_Cession">
+   <property name="text">
+    <string>&amp;Cession...</string>
+   </property>
+  </action>
+  <action name="action_Banks">
+   <property name="text">
+    <string>&amp;Banks...</string>
+   </property>
+  </action>
+  <action name="action_People">
+   <property name="text">
+    <string>&amp;People...</string>
+   </property>
+  </action>
+  <action name="actionC_lients">
+   <property name="text">
+    <string>C&amp;lients...</string>
+   </property>
+  </action>
+  <action name="action_Suppliers">
+   <property name="text">
+    <string>&amp;Suppliers...</string>
+   </property>
+  </action>
+  <action name="action_Reports_5">
+   <property name="text">
+    <string>&amp;Reports...</string>
+   </property>
+  </action>
+  <action name="action_Import_2">
+   <property name="text">
+    <string>&amp;Import..</string>
+   </property>
+  </action>
+  <action name="action_Import_3">
+   <property name="text">
+    <string>&amp;Import...</string>
+   </property>
+  </action>
+  <action name="action_Reports_6">
+   <property name="text">
+    <string>&amp;Reports...</string>
+   </property>
+  </action>
+  <action name="action_Import_4">
+   <property name="text">
+    <string>&amp;Import...</string>
+   </property>
+  </action>
+  <action name="action_Bovine">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="checked">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>&amp;Bovine</string>
+   </property>
+  </action>
+  <action name="action_Caprine">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>&amp;Caprine</string>
+   </property>
+  </action>
+  <action name="action_Ovine">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>&amp;Ovine</string>
+   </property>
+  </action>
+  <action name="action_Porcine">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="enabled">
+    <bool>false</bool>
+   </property>
+   <property name="text">
+    <string>&amp;Porcine</string>
+   </property>
+  </action>
+  <action name="action_Equine">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="enabled">
+    <bool>false</bool>
+   </property>
+   <property name="text">
+    <string>&amp;Equine</string>
+   </property>
+  </action>
+  <action name="action_Test_Panel">
+   <property name="text">
+    <string>&amp;Test Panel...</string>
+   </property>
+  </action>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

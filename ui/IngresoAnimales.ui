@@ -1,0 +1,372 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>Dialog</class>
+ <widget class="QDialog" name="Dialog">
+  <property name="enabled">
+   <bool>true</bool>
+  </property>
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>466</width>
+    <height>232</height>
+   </rect>
+  </property>
+  <property name="baseSize">
+   <size>
+    <width>7</width>
+    <height>0</height>
+   </size>
+  </property>
+  <property name="windowTitle">
+   <string>Ingreso de Animales</string>
+  </property>
+  <property name="windowIcon">
+   <iconset>
+    <normaloff>Ganado.ico</normaloff>Ganado.ico</iconset>
+  </property>
+  <widget class="QPushButton" name="btnCancel">
+   <property name="geometry">
+    <rect>
+     <x>295</x>
+     <y>200</y>
+     <width>76</width>
+     <height>23</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>Cancelar</string>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="btnOk">
+   <property name="geometry">
+    <rect>
+     <x>380</x>
+     <y>200</y>
+     <width>76</width>
+     <height>23</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>Aceptar</string>
+   </property>
+   <property name="default">
+    <bool>true</bool>
+   </property>
+  </widget>
+  <widget class="QPlainTextEdit" name="pteComentario">
+   <property name="geometry">
+    <rect>
+     <x>175</x>
+     <y>130</y>
+     <width>281</width>
+     <height>64</height>
+    </rect>
+   </property>
+   <property name="tabChangesFocus">
+    <bool>true</bool>
+   </property>
+   <property name="plainText">
+    <string/>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lblComentario">
+   <property name="geometry">
+    <rect>
+     <x>175</x>
+     <y>113</y>
+     <width>71</width>
+     <height>16</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>C&amp;omentarios</string>
+   </property>
+   <property name="buddy">
+    <cstring>pteComentario</cstring>
+   </property>
+  </widget>
+  <widget class="QGroupBox" name="grpIdentificador">
+   <property name="geometry">
+    <rect>
+     <x>535</x>
+     <y>120</y>
+     <width>61</width>
+     <height>41</height>
+    </rect>
+   </property>
+   <property name="title">
+    <string>Grupo</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lblTipoDeEntrada">
+   <property name="geometry">
+    <rect>
+     <x>17</x>
+     <y>15</y>
+     <width>90</width>
+     <height>13</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>* &amp;Tipo de Entrada</string>
+   </property>
+   <property name="alignment">
+    <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+   </property>
+   <property name="buddy">
+    <cstring>cboTipoDeEntrada</cstring>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lblDuenio">
+   <property name="geometry">
+    <rect>
+     <x>242</x>
+     <y>41</y>
+     <width>90</width>
+     <height>13</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>&amp;Dueño</string>
+   </property>
+   <property name="alignment">
+    <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+   </property>
+   <property name="buddy">
+    <cstring>cboDuenio</cstring>
+   </property>
+  </widget>
+  <widget class="QCheckBox" name="chkPreniez">
+   <property name="enabled">
+    <bool>true</bool>
+   </property>
+   <property name="geometry">
+    <rect>
+     <x>175</x>
+     <y>90</y>
+     <width>70</width>
+     <height>17</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>Pre&amp;ñada</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lblMarca">
+   <property name="geometry">
+    <rect>
+     <x>242</x>
+     <y>66</y>
+     <width>90</width>
+     <height>13</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>&amp;Marca</string>
+   </property>
+   <property name="alignment">
+    <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+   </property>
+   <property name="buddy">
+    <cstring>cboMarca</cstring>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lblRaza">
+   <property name="geometry">
+    <rect>
+     <x>17</x>
+     <y>66</y>
+     <width>90</width>
+     <height>13</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>* &amp;Raza</string>
+   </property>
+   <property name="alignment">
+    <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+   </property>
+   <property name="buddy">
+    <cstring>cboRaza</cstring>
+   </property>
+  </widget>
+  <widget class="ComboTabla" name="cboRaza">
+   <property name="geometry">
+    <rect>
+     <x>110</x>
+     <y>63</y>
+     <width>121</width>
+     <height>20</height>
+    </rect>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lblCategoria">
+   <property name="geometry">
+    <rect>
+     <x>17</x>
+     <y>41</y>
+     <width>90</width>
+     <height>13</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>* Cate&amp;goría</string>
+   </property>
+   <property name="alignment">
+    <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+   </property>
+   <property name="buddy">
+    <cstring>cboCategoria</cstring>
+   </property>
+  </widget>
+  <widget class="ComboTabla" name="cboCategoria">
+   <property name="geometry">
+    <rect>
+     <x>110</x>
+     <y>38</y>
+     <width>121</width>
+     <height>20</height>
+    </rect>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lblEstablecimiento">
+   <property name="geometry">
+    <rect>
+     <x>242</x>
+     <y>15</y>
+     <width>90</width>
+     <height>13</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>* &amp;Establecimiento</string>
+   </property>
+   <property name="alignment">
+    <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+   </property>
+   <property name="buddy">
+    <cstring>cboEstablecimiento</cstring>
+   </property>
+  </widget>
+  <widget class="ComboTabla" name="cboEstablecimiento">
+   <property name="geometry">
+    <rect>
+     <x>335</x>
+     <y>13</y>
+     <width>121</width>
+     <height>20</height>
+    </rect>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="btnAdic">
+   <property name="geometry">
+    <rect>
+     <x>335</x>
+     <y>87</y>
+     <width>121</width>
+     <height>23</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>Datos Adicional&amp;es ...</string>
+   </property>
+   <property name="default">
+    <bool>false</bool>
+   </property>
+  </widget>
+  <widget class="ComboTabla" name="cboDuenio">
+   <property name="geometry">
+    <rect>
+     <x>335</x>
+     <y>38</y>
+     <width>121</width>
+     <height>20</height>
+    </rect>
+   </property>
+  </widget>
+  <widget class="ComboTabla" name="cboMarca">
+   <property name="geometry">
+    <rect>
+     <x>335</x>
+     <y>63</y>
+     <width>121</width>
+     <height>20</height>
+    </rect>
+   </property>
+  </widget>
+  <widget class="ComboTabla" name="cboTipoDeEntrada">
+   <property name="geometry">
+    <rect>
+     <x>110</x>
+     <y>13</y>
+     <width>121</width>
+     <height>20</height>
+    </rect>
+   </property>
+  </widget>
+  <widget class="QGroupBox" name="grpIdentificacion">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>115</y>
+     <width>151</width>
+     <height>80</height>
+    </rect>
+   </property>
+   <property name="title">
+    <string>&amp;Identificación</string>
+   </property>
+   <widget class="QPushButton" name="btnCaravanas">
+    <property name="geometry">
+     <rect>
+      <x>15</x>
+      <y>20</y>
+      <width>121</width>
+      <height>23</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>* &amp;Caravanas ...</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="btnOtros">
+    <property name="geometry">
+     <rect>
+      <x>15</x>
+      <y>50</y>
+      <width>121</width>
+      <height>23</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>* &amp;Otras señas ...</string>
+    </property>
+   </widget>
+  </widget>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>ComboTabla</class>
+   <extends>QComboBox</extends>
+   <header>comboTabla</header>
+  </customwidget>
+ </customwidgets>
+ <tabstops>
+  <tabstop>cboTipoDeEntrada</tabstop>
+  <tabstop>cboCategoria</tabstop>
+  <tabstop>chkPreniez</tabstop>
+  <tabstop>cboRaza</tabstop>
+  <tabstop>cboEstablecimiento</tabstop>
+  <tabstop>cboDuenio</tabstop>
+  <tabstop>cboMarca</tabstop>
+  <tabstop>btnCaravanas</tabstop>
+  <tabstop>btnAdic</tabstop>
+  <tabstop>pteComentario</tabstop>
+  <tabstop>btnCancel</tabstop>
+  <tabstop>btnOk</tabstop>
+ </tabstops>
+ <resources/>
+ <connections/>
+</ui>

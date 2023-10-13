@@ -1,0 +1,104 @@
+<mxfile host="Electron" modified="2023-07-31T11:54:15.915Z" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/21.6.5 Chrome/114.0.5735.243 Electron/25.3.1 Safari/537.36" etag="d2_BnN-s1QgcVovyanrG" version="21.6.5" type="device">
+  <diagram id="fdhjhS6zL77uIq2nBlh7" name="Page-1">
+    <mxGraphModel dx="2607" dy="1764" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="1654" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="6EWm7s-Q4nNU7jjrfgrv-23" value="&lt;font&gt;&lt;font style=&quot;font-size: 48px&quot;&gt;&lt;b&gt;System Menus v4.1.7&lt;/b&gt;&lt;/font&gt;&lt;br&gt;&lt;/font&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="210" y="61.31" width="560" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="R7aCyOPwkrr2rJbTlwmy-32" value="&lt;font face=&quot;helvetica&quot; style=&quot;font-size: 14px&quot;&gt;&lt;b&gt;Modules&lt;/b&gt;: Menu items para lanzar modules de Animales: Bovino, Caprino, Porcino, etc.&lt;/font&gt;" style="text;whiteSpace=wrap;html=1;align=left;" parent="1" vertex="1">
+          <mxGeometry x="1770" y="240" width="170" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="R7aCyOPwkrr2rJbTlwmy-37" value="&lt;b style=&quot;line-height: 100%&quot;&gt;Transactions&lt;br&gt;&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="1130.0002380952383" y="187" width="110.51071428571429" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="R7aCyOPwkrr2rJbTlwmy-50" value="&lt;b style=&quot;line-height: 100%&quot;&gt;Reports&lt;br&gt;&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="1250" y="187" width="87" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="R7aCyOPwkrr2rJbTlwmy-52" value="&lt;div&gt;&lt;b&gt;File&lt;/b&gt;&lt;/div&gt;&lt;div&gt;&lt;b&gt;&lt;br&gt;&lt;/b&gt;&lt;/div&gt;&lt;div&gt;Import&lt;b&gt;&lt;br&gt;&lt;/b&gt;&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;&lt;div style=&quot;text-align: left&quot;&gt;&lt;br&gt;&lt;/div&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;spacingLeft=0;spacingRight=0;" parent="1" vertex="1">
+          <mxGeometry x="1163" y="40" width="100" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="R7aCyOPwkrr2rJbTlwmy-60" value="&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;Import&lt;b&gt;&lt;br&gt;&lt;/b&gt;&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;&lt;div style=&quot;text-align: left&quot;&gt;&lt;br&gt;&lt;/div&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;spacingLeft=0;spacingRight=0;" parent="1" vertex="1">
+          <mxGeometry x="900" y="40" width="100" height="122.61467889908258" as="geometry" />
+        </mxCell>
+        <mxCell id="R7aCyOPwkrr2rJbTlwmy-71" value="&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;Import&lt;b&gt;&lt;br&gt;&lt;/b&gt;&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;&lt;div style=&quot;text-align: left&quot;&gt;&lt;br&gt;&lt;/div&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;spacingLeft=0;spacingRight=0;" parent="1" vertex="1">
+          <mxGeometry x="770" y="323.46000000000004" width="95.75" height="86.54" as="geometry" />
+        </mxCell>
+        <mxCell id="GPPxOyLHS5sZH9lbrh8y-4" value="Comment" parent="0" />
+        <mxCell id="6EWm7s-Q4nNU7jjrfgrv-31" value="" style="group" parent="GPPxOyLHS5sZH9lbrh8y-4" vertex="1" connectable="0">
+          <mxGeometry x="30" y="241" width="1720" height="884.93" as="geometry" />
+        </mxCell>
+        <mxCell id="6EWm7s-Q4nNU7jjrfgrv-28" value="" style="rounded=0;whiteSpace=wrap;html=1;spacingBottom=-5;" parent="6EWm7s-Q4nNU7jjrfgrv-31" vertex="1">
+          <mxGeometry x="20" y="5" width="1720" height="808.9999999999999" as="geometry" />
+        </mxCell>
+        <mxCell id="R7aCyOPwkrr2rJbTlwmy-17" value="&lt;b style=&quot;line-height: 100%&quot;&gt;File&lt;br&gt;&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="6EWm7s-Q4nNU7jjrfgrv-31" vertex="1">
+          <mxGeometry x="23.97" y="18.39" width="76.03" height="34.61" as="geometry" />
+        </mxCell>
+        <mxCell id="R7aCyOPwkrr2rJbTlwmy-16" value="&lt;b style=&quot;line-height: 100%&quot;&gt;Modules&lt;br&gt;&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="6EWm7s-Q4nNU7jjrfgrv-31" vertex="1">
+          <mxGeometry x="1588.61" y="16.65" width="117.25" height="43.35" as="geometry" />
+        </mxCell>
+        <mxCell id="R7aCyOPwkrr2rJbTlwmy-31" value="&lt;b style=&quot;line-height: 100%&quot;&gt;Queries&lt;br&gt;&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="6EWm7s-Q4nNU7jjrfgrv-31" vertex="1">
+          <mxGeometry x="117.00999999999999" y="18.39" width="75.77" height="34.61" as="geometry" />
+        </mxCell>
+        <mxCell id="R7aCyOPwkrr2rJbTlwmy-30" value="&lt;b style=&quot;line-height: 100%&quot;&gt;Activities&lt;br&gt;&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="6EWm7s-Q4nNU7jjrfgrv-31" vertex="1">
+          <mxGeometry x="220" y="18.39" width="253.33" height="34.61" as="geometry" />
+        </mxCell>
+        <mxCell id="R7aCyOPwkrr2rJbTlwmy-29" value="&lt;b style=&quot;line-height: 100%&quot;&gt;Activity Programming&lt;br&gt;&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="6EWm7s-Q4nNU7jjrfgrv-31" vertex="1">
+          <mxGeometry x="490" y="18.39" width="210" height="34.61" as="geometry" />
+        </mxCell>
+        <mxCell id="R7aCyOPwkrr2rJbTlwmy-27" value="&lt;b style=&quot;line-height: 100%&quot;&gt;Reports&amp;nbsp;&lt;br&gt;&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="6EWm7s-Q4nNU7jjrfgrv-31" vertex="1">
+          <mxGeometry x="1220" y="18.39" width="106.04" height="34.61" as="geometry" />
+        </mxCell>
+        <mxCell id="R7aCyOPwkrr2rJbTlwmy-51" value="&lt;b style=&quot;line-height: 100%&quot;&gt;Money&lt;br&gt;&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="6EWm7s-Q4nNU7jjrfgrv-31" vertex="1">
+          <mxGeometry x="730" y="20.1" width="95.75" height="32.9" as="geometry" />
+        </mxCell>
+        <mxCell id="6EWm7s-Q4nNU7jjrfgrv-22" value="&lt;div&gt;&lt;b&gt;File&lt;/b&gt;&lt;/div&gt;&lt;div&gt;&lt;b&gt;&lt;br&gt;&lt;/b&gt;&lt;/div&gt;&lt;div&gt;Import&lt;b&gt;&lt;br&gt;&lt;/b&gt;&lt;/div&gt;&lt;div&gt;Export&lt;/div&gt;&lt;div&gt;Print&lt;/div&gt;&lt;div&gt;--------------&lt;/div&gt;&lt;div&gt;Help&lt;/div&gt;&lt;div&gt;&lt;div style=&quot;text-align: left&quot;&gt;&lt;br&gt;&lt;/div&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;spacingLeft=0;spacingRight=0;" parent="6EWm7s-Q4nNU7jjrfgrv-31" vertex="1">
+          <mxGeometry x="23.89" y="75.54" width="76.11" height="113.46" as="geometry" />
+        </mxCell>
+        <mxCell id="R7aCyOPwkrr2rJbTlwmy-58" value="&lt;div&gt;Animal Count&lt;/div&gt;&lt;div&gt;Status&lt;/div&gt;&lt;div&gt;Localization&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;------------------&lt;/div&gt;&lt;div&gt;Reports&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;spacingLeft=0;spacingRight=0;" parent="6EWm7s-Q4nNU7jjrfgrv-31" vertex="1">
+          <mxGeometry x="110" y="72.46" width="92.78" height="116.54" as="geometry" />
+        </mxCell>
+        <mxCell id="R7aCyOPwkrr2rJbTlwmy-57" value="&lt;div&gt;&lt;b&gt;Health&lt;/b&gt;&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;Application&lt;/div&gt;&lt;div&gt;Procedure&lt;/div&gt;&lt;div&gt;Curing&lt;br&gt;&lt;/div&gt;&lt;div&gt;Vital Parameters&lt;/div&gt;&lt;div&gt;Semen Extraction&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;------------------------&lt;/div&gt;&lt;div&gt;Reports&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;spacingLeft=0;spacingRight=0;" parent="6EWm7s-Q4nNU7jjrfgrv-31" vertex="1">
+          <mxGeometry x="222.5" y="250.67" width="119.44" height="219.33" as="geometry" />
+        </mxCell>
+        <mxCell id="R7aCyOPwkrr2rJbTlwmy-56" value="&lt;div&gt;Health&lt;/div&gt;&lt;div&gt;Livestock Management&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;--------------------------------------------&lt;/div&gt;&lt;div&gt;Reports&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;spacingLeft=0;spacingRight=0;" parent="6EWm7s-Q4nNU7jjrfgrv-31" vertex="1">
+          <mxGeometry x="490" y="72.45" width="210" height="86.55" as="geometry" />
+        </mxCell>
+        <mxCell id="R7aCyOPwkrr2rJbTlwmy-54" value="&lt;div&gt;More Reports??&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;spacingLeft=0;spacingRight=0;" parent="6EWm7s-Q4nNU7jjrfgrv-31" vertex="1">
+          <mxGeometry x="1225.01" y="72.46" width="101.03" height="86.54" as="geometry" />
+        </mxCell>
+        <mxCell id="R7aCyOPwkrr2rJbTlwmy-53" value="&lt;div&gt;Purchase&lt;/div&gt;&lt;div&gt;Sale&lt;/div&gt;&lt;div&gt;Exchange&lt;/div&gt;&lt;div&gt;Cession&lt;/div&gt;&lt;div&gt;---------------&lt;/div&gt;&lt;div&gt;Banks&lt;/div&gt;&lt;div&gt;People&lt;/div&gt;&lt;div&gt;------------------&lt;/div&gt;&lt;div&gt;Clients&lt;/div&gt;&lt;div&gt;Suppliers&lt;/div&gt;&lt;div&gt;--------------&lt;/div&gt;&lt;div&gt;Reports&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;spacingLeft=0;spacingRight=0;" parent="6EWm7s-Q4nNU7jjrfgrv-31" vertex="1">
+          <mxGeometry x="730" y="72.46" width="95.75" height="247.54" as="geometry" />
+        </mxCell>
+        <mxCell id="R7aCyOPwkrr2rJbTlwmy-59" value="&lt;div&gt;Health&lt;/div&gt;&lt;div&gt;&lt;span&gt;Livestock Management&lt;/span&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;Parameter Setting&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;spacingLeft=0;spacingRight=0;" parent="6EWm7s-Q4nNU7jjrfgrv-31" vertex="1">
+          <mxGeometry x="222.5" y="68.99999999999997" width="250.83333333333331" height="166.82999999999998" as="geometry" />
+        </mxCell>
+        <mxCell id="R7aCyOPwkrr2rJbTlwmy-61" value="&lt;div&gt;Bovine&lt;/div&gt;&lt;div&gt;Caprine&lt;/div&gt;&lt;div&gt;Ovine&lt;/div&gt;&lt;div&gt;Porcine&lt;/div&gt;&lt;div&gt;Equine&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;spacingLeft=0;spacingRight=0;" parent="6EWm7s-Q4nNU7jjrfgrv-31" vertex="1">
+          <mxGeometry x="1592.1944444444443" y="69" width="107.5" height="100.16999999999999" as="geometry" />
+        </mxCell>
+        <mxCell id="R7aCyOPwkrr2rJbTlwmy-63" value="&lt;div&gt;&lt;b&gt;Livestock Management&lt;/b&gt;&lt;/div&gt;&lt;div&gt;&lt;b&gt;&lt;br&gt;&lt;/b&gt;&lt;/div&gt;&lt;div&gt;Inventory&lt;/div&gt;&lt;div&gt;Status&lt;/div&gt;&lt;div&gt;Castration&lt;/div&gt;&lt;div&gt;Weaning (Destete)&lt;/div&gt;&lt;div&gt;Movements&lt;/div&gt;&lt;div&gt;Milking&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;-----------------------&lt;/div&gt;&lt;div&gt;Reports&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;spacingLeft=0;spacingRight=0;" parent="6EWm7s-Q4nNU7jjrfgrv-31" vertex="1">
+          <mxGeometry x="353.88888888888886" y="248.99999999999997" width="119.44444444444444" height="220.99999999999997" as="geometry" />
+        </mxCell>
+        <mxCell id="R7aCyOPwkrr2rJbTlwmy-68" value="&lt;b style=&quot;line-height: 100%&quot;&gt;Notifications&lt;br&gt;&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="6EWm7s-Q4nNU7jjrfgrv-31" vertex="1">
+          <mxGeometry x="850" y="19" width="110" height="32.9" as="geometry" />
+        </mxCell>
+        <mxCell id="R7aCyOPwkrr2rJbTlwmy-69" value="&lt;b style=&quot;line-height: 100%&quot;&gt;Persons&lt;br&gt;&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="6EWm7s-Q4nNU7jjrfgrv-31" vertex="1">
+          <mxGeometry x="970" y="19" width="100" height="32.9" as="geometry" />
+        </mxCell>
+        <mxCell id="R7aCyOPwkrr2rJbTlwmy-72" value="&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;Import&lt;b&gt;&lt;br&gt;&lt;/b&gt;&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;&lt;div style=&quot;text-align: left&quot;&gt;&lt;br&gt;&lt;/div&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;spacingLeft=0;spacingRight=0;direction=west;" parent="6EWm7s-Q4nNU7jjrfgrv-31" vertex="1">
+          <mxGeometry x="850" y="69" width="110" height="86.54" as="geometry" />
+        </mxCell>
+        <mxCell id="R7aCyOPwkrr2rJbTlwmy-70" value="&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;Import&lt;b&gt;&lt;br&gt;&lt;/b&gt;&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;&lt;div style=&quot;text-align: left&quot;&gt;--------------&lt;/div&gt;&lt;/div&gt;&lt;div&gt;Reports&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;spacingLeft=0;spacingRight=0;direction=south;" parent="6EWm7s-Q4nNU7jjrfgrv-31" vertex="1">
+          <mxGeometry x="974.605" y="64.39500000000001" width="86.54" height="95.75" as="geometry" />
+        </mxCell>
+        <mxCell id="R7aCyOPwkrr2rJbTlwmy-67" value="&lt;b style=&quot;line-height: 100%&quot;&gt;System&lt;br&gt;&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;" parent="6EWm7s-Q4nNU7jjrfgrv-31" vertex="1">
+          <mxGeometry x="1100" y="19" width="105.75" height="32.9" as="geometry" />
+        </mxCell>
+        <mxCell id="R7aCyOPwkrr2rJbTlwmy-74" value="&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;Import&lt;b&gt;&lt;br&gt;&lt;/b&gt;&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;&lt;div style=&quot;text-align: left&quot;&gt;&lt;br&gt;&lt;/div&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;spacingLeft=0;spacingRight=0;direction=south;" parent="6EWm7s-Q4nNU7jjrfgrv-31" vertex="1">
+          <mxGeometry x="1100" y="69" width="100" height="95.75" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
