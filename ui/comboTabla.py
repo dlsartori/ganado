@@ -69,7 +69,7 @@ if __name__ == "__main__":
     # either fill the standard model of the combobox
     combo.addItems(string_list)
 
-    # or use another model
+    # or use an existing model
     #combo.setModel(QStringListModel(string_list))
 
     combo.resize(200, 20)
