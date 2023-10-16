@@ -707,26 +707,26 @@ class DataTable(object):
     def packTable(self):
         return dict(zip(self.__xferableItems, [self.__getattribute__(j) for j in self.__xferableItems]))
 
-    @classmethod
-    def unpackTable(cls, tbl_dict):
-        """Returns a DataTable object created from parameters passed in tbl_dict,or error if parameters are not valid"""
-        # TODO: Implementar sin parametros de la tabla. Solo parametros externos como operation (si hace falta).
-        # print(f"{tbl_dict.get('_tblName')}, {tbl_dict.get('_dataList')}, {tbl_dict.get('_fldNames')}, "
-        #       f"{tbl_dict.get('_operation')}")
-        temp = DataTable(tbl_dict.get('_tblName'), tbl_dict.get('_dataList'), tbl_dict.get('_fldNames'),
-                         _operation=tbl_dict.get('_operation'))
-        return temp if temp.isValid else f'ERR_SYS_Invalid Arguments. DataTable {tbl_dict.get("_tblName")} not created.'
-
-    @classmethod
-    def unpackTableOriginal(cls, tbl_dict):
-        """Returns a DataTable object created from parameters passed in tbl_dict,or error if parameters are not valid"""
-
-        # print(f"{tbl_dict.get('_tblName')}, {tbl_dict.get('_dataList')}, {tbl_dict.get('_fldNames')}, "
-        #       f"{tbl_dict.get('_operation')}")
-        temp = DataTable(tbl_dict.get('_tblName'), tbl_dict.get('_dataList'), tbl_dict.get('_fldNames'),
-                         _operation=tbl_dict.get('_operation'))
-        return temp if temp.isValid else f'ERR_SYS_Invalid Arguments. DataTable {tbl_dict.get("_tblName")} not created.'
-
+    # @classmethod
+    # def unpackTable(cls, tbl_dict):
+    #     """Returns a DataTable object created from parameters passed in tbl_dict,or error if parameters are not valid"""
+    #     # TODO: Implementar sin parametros de la tabla. Solo parametros externos como operation (si hace falta).
+    #     # print(f"{tbl_dict.get('_tblName')}, {tbl_dict.get('_dataList')}, {tbl_dict.get('_fldNames')}, "
+    #     #       f"{tbl_dict.get('_operation')}")
+    #     temp = DataTable(tbl_dict.get('_tblName'), tbl_dict.get('_dataList'), tbl_dict.get('_fldNames'),
+    #                      _operation=tbl_dict.get('_operation'))
+    #     return temp if temp.isValid else f'ERR_SYS_Invalid Arguments. DataTable {tbl_dict.get("_tblName")} not created.'
+    #
+    # @classmethod
+    # def unpackTableOriginal(cls, tbl_dict):
+    #     """Returns a DataTable object created from parameters passed in tbl_dict,or error if parameters are not valid"""
+    #
+    #     # print(f"{tbl_dict.get('_tblName')}, {tbl_dict.get('_dataList')}, {tbl_dict.get('_fldNames')}, "
+    #     #       f"{tbl_dict.get('_operation')}")
+    #     temp = DataTable(tbl_dict.get('_tblName'), tbl_dict.get('_dataList'), tbl_dict.get('_fldNames'),
+    #                      _operation=tbl_dict.get('_operation'))
+    #     return temp if temp.isValid else f'ERR_SYS_Invalid Arguments. DataTable {tbl_dict.get("_tblName")} not created.'
+    #
 
     @staticmethod
     def __writeScheduler(func):  # wrapper para lanzar setRecords() en multiple threads.

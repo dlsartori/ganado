@@ -521,8 +521,10 @@ class GenericActivityAnimal(AnimalActivity):                # GenericActivity Cl
     ***** Additional external methods can be attached to individual objects via the register_method() method *****
     """
     __method_name = 'generic_activity'  # Defines __method_name to be included in Activity._activity_class_register
-    # __registered_methods = {}      # {registered_method_name: method object, }
+    # methods not to be deleted / unregistered.
+    __reserved_names = ('get', 'set', 'register_method', 'unregister_method','methods_wrapper','_createActivityObjects')
     __initialized = False
+
     def __new__(cls, activName, *args, **kwargs):  # Override para crear objeto nuevo solo si Activity no esta definida
         if activName not in cls.getActivitiesDict():
             raise NameError(f'ERR_INP_Invalid Activity: {activName}. Activity not created.')
@@ -663,20 +665,41 @@ class GenericActivityAnimal(AnimalActivity):                # GenericActivity Cl
         return self._tblRAName, self._tblLinkName, self._tblDataName
 
     def register_method(self, method_obj=None):
+        """
+        Registers method_obj (an external function) as a method in GenericActivity class. After registration, method_obj
+        can be accessed by its name as a regular attribute of GenericActivity.
+        *** IMPORTANT: method_obj MUST define self as its first positional argument. Ex: my_func(self, *args, **kwargs).
+        Also IMPORTANT: if method_obj is already defined, any new call to register_method() with the same method_obj
+        will OVERRIDE the existing attribute. This is by design to allow the implementation of updates to all registered
+        attributes.
+        @param method_obj: callable (a function name)
+        @return: True if registration successful. None if otherwise.
+        """
         if not callable(method_obj):
             return None
         setattr(self, method_obj.__name__, self.methods_wrapper(method_obj))
         return True
 
-    # Wrapper passes self (a GenericActivity instance) to func so that self, self.outerObject are available to func.
     def methods_wrapper(self, func):
+        """
+        Used to pass self (a GenericActivity instance) to func so that self, self.outerObject are available to func.
+        @param func: wrapped function.
+        *** IMPORTANT: func MUST define self as its first positional argument. Ex: my_func(self, *args, **kwargs). ***
+        """
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             return func(self, *args, **kwargs)
         return wrapper
 
     def unregister_method(self, method_name: str):
-        if hasattr(self, method_name):
+        """
+        Deletes GenericActivity attribute method_name if it exists and if it's not a reserved name.
+        @param method_name: callable. Class method to delete.
+        @return: None
+        """
+        if hasattr(self, method_name) and callable(getattr(self, method_name)):
+            if method_name.strip() in self.__reserved_names:
+                return None             # ignores reserved method names
             delattr(self, method_name)
         return None
 

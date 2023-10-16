@@ -36,8 +36,12 @@ def loadItemsFromDB(cls, *, items=(), init_tags=False, **kwargs):
         raise AttributeError(e)
 
     if hasattr(cls, 'classID'):
-        itemsTable = getRecords(cls.tblObjName(), '', '', None, '*', fldFK_ClaseDeAnimal=cls.classID(),
-                                fldDateExit=0, fldID=items)   # Animales
+        if '*' in items:
+            itemsTable = getRecords(cls.tblObjName(), '', '', None, '*',
+                                    fldFK_ClaseDeAnimal=cls.classID(), fldDateExit=0)  # Animales
+        else:
+            itemsTable = getRecords(cls.tblObjName(), '', '', None, '*',
+                                    fldFK_ClaseDeAnimal=cls.classID(), fldDateExit=0, fldID=items)   # Animales
     else:
         itemsTable = getRecords(cls.tblObjName(), '', '', None, '*', fldID=items)  # Todos los demas
 
@@ -47,9 +51,9 @@ def loadItemsFromDB(cls, *, items=(), init_tags=False, **kwargs):
         tblRA_Desasignados = getRecords(cls.tblRAName(), '', '', None, 'fldID',
                                         fldFK_NombreActividad=cls.getActivitiesDict()['Caravaneo - Desasignar']) \
             if init_tags else None
-    itemsList = items if items and hasattr(items, '__iter__') else idCol
+    itemsList = items if items and hasattr(items, '__iter__') and not isinstance(items, str) else idCol
     if itemsList == idCol:
-        itemsList = idCol
+        pass
     else:
         itemsList = [idObj for idObj in itemsList if idObj in idCol]           # validates all items IDs.
 

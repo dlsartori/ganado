@@ -167,7 +167,8 @@ class Bovine(Mammal):
             # strip_str: constr(strip_whitespace=True)
             # lower_str: constr(to_lower=True)
 
-            @validator('kwargs', pre=False, each_item=True, allow_reuse=True, check_fields=False)
+
+            @field_validator('kwargs', '', check_fields=False)
             @classmethod
             def validate_kwargs(cls, argsDict):
                 myDOB = None

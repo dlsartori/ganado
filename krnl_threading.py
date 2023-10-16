@@ -679,9 +679,10 @@ class FrontEndHandler(object):
         self.__thread = None
         self.__running = False
         self.__run_result = VOID
-        self.__stop_event = event or Event()
+        self.__exit_event = event if isinstance(event, Event) else Event()
 
         self.register_obj()
+
 
     def start(self, *args, **kwargs):
         def executor():
@@ -691,7 +692,8 @@ class FrontEndHandler(object):
             self.__run_result = func_runner.run()       # thread just sits here until run() ends.
             if self.__run_result is not VOID:
                 print(f'Thread: {self.__thread.name}; Alive: {self.__thread.is_alive()}; run_result: {self.__run_result}')
-                self.__stop_event.set()  # event necesario porque join() de este thread se debe hacer desde OTRO thread.
+                self.__exit_event.set()  # event necesario porque join() de este thread se debe hacer desde OTRO thread.
+            return None
 
         # Crea thread. Lanza thread si esta en autostart.
         if not self.__running:
@@ -715,13 +717,14 @@ class FrontEndHandler(object):
             self.__running = False
             self.unregister_obj()
         print(f'ABOUT TO JOIN THREAD {self.__thread}.')
-        self.__thread.join()
+        self.__thread.join()            # sits here until self.__thread execution ends.
+        return True
 
     def is_running(self):
         return self.__running
 
     def exit_event(self):
-        return self.__stop_event.is_set()
+        return self.__exit_event.is_set()
 
     def register_obj(self):
         self._obj_set.add(self)
@@ -734,6 +737,14 @@ class FrontEndHandler(object):
 
     @classmethod
     def __main_loop_runner(cls):
+        """
+        Loop executed by front_end_runner that in turn launches and runs and stops all front end modules, each one in
+        a separate thread.
+        Objects (functions) found in obj_set are checked for exit_event: if exit_event is set, function is terminated.
+        If exit_event is not set and function is not yet running, then it starts running.
+        loop continues to run (even if obj_set is empty) until front_end_quit event is set.
+        @return: None
+        """
         while True:
             if cls._front_end_quit.is_set():  # If event for main loop is set, quits main looping function.
                 break

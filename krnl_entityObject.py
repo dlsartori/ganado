@@ -4,8 +4,8 @@ from krnl_config import time_mt, DAYS_MULT, USE_DAYS_MULT, tables_and_binding_ob
 from krnl_abstract_method_factory import ActivityMethod
 # TODO(cmt): pydantic used in Bovine for now. See where this leads us to.
 import pydantic
-from pydantic import BaseModel, validator, typing, ValidationError, constr, conint, conlist, PositiveInt, NegativeInt, \
-    PositiveFloat
+from pydantic import (BaseModel, field_validator, typing, ValidationError, constr, conint, conlist, PositiveInt,
+                      NegativeInt, PositiveFloat)
 
 def moduleName():
     return str(os.path.basename(__file__))
