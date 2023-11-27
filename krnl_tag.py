@@ -368,20 +368,27 @@ class Tag(AssetItem):
         new_tag = cls(fldTagNumber=tagNumber, fldFK_TecnologiaDeCaravana=technology, fldFK_Color=tagColor,
                        fldFK_TipoDeCaravana=tagType, fldTagMarkQuantity=marks, fldFK_FormatoDeCaravana=tagFormat,
                        fldFK_UserID=sessionActiveUser, fldObjectUID=str(uuid4().hex), fldTimeStamp=time_mt('datetime'))
-        idTag = setRecord('tblCaravanas', **new_tag.getElements)
-        new_tag.__recordID = idTag      # Actualiza Tag ID con valor obtenido de setRecord()
-        new_tag.register()   # TODO: SIEMPRE registrar Tag (al igual que Animal). __init__() NO registra los objetos.
-        print(f'TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT Caravana Nueva: {type(new_tag)} / {new_tag.getElements} ')
+        temp_elements = new_tag.getElements.copy()
+        temp_elements.pop('fldID')
+        idTag = setRecord('tblCaravanas', **temp_elements)
+        if isinstance(idTag, int):
+            new_tag.__recordID = idTag      # Actualiza Tag ID con valor obtenido de setRecord()
+            new_tag.register()   # TODO: SIEMPRE registrar Tag (al igual que Animal). __init__() NO registra los objetos.
+            print(f'TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT Caravana Nueva: {type(new_tag)} / {new_tag.getElements} ')
+            tblRA.setVal(0, fldFK_NombreActividad=Tag.getActivitiesDict()['Alta'], fldFK_UserID=sessionActiveUser)
+            idActividadRA = setRecord(tblRA.tblName, **tblRA.unpackItem(0))   # Crea registro en tblRA
+            tblRA.setVal(0, fldID=idActividadRA, fldComment=f'Generated Tag. ID: {new_tag.ID} / {new_tag.tagNumber}')
+            tblLink.setVal(0, fldComment=f'{callerFunction()}. Tag ID: {new_tag.ID} / {new_tag.tagNumber}')  # fldFK_Actividad=idActividadRA,
+            # _ = setRecord(tblLink.tblName, **tblLink.unpackItem(0))
 
-        tblRA.setVal(0, fldFK_NombreActividad=Tag.getActivitiesDict()['Alta'], fldFK_UserID=sessionActiveUser)
-        idActividadRA = setRecord(tblRA.tblName, **tblRA.unpackItem(0))   # Crea registro en tblRA
-        tblRA.setVal(0, fldID=idActividadRA, fldComment=f'Generated Tag. ID: {new_tag.ID} / {new_tag.tagNumber}')
-        tblLink.setVal(0, fldComment=f'{callerFunction()}. Tag ID: {new_tag.ID} / {new_tag.tagNumber}')  # fldFK_Actividad=idActividadRA,
-        # _ = setRecord(tblLink.tblName, **tblLink.unpackItem(0))
+            new_tag.status.set(tblRA, tblLink, tblStatus, status=tagStatus)
+            new_tag.localization.set(tblRA, tblLink, localization="El Ñandu")
+            return new_tag
+        else:
+            krnl_logger.error(f"ERR_DBAccess: Cannot write to table {cls.__tblObjectsName}. Tag not created.")
+            del new_tag
+            return None
 
-        new_tag.status.set(tblRA, tblLink, tblStatus, status=tagStatus)
-        new_tag.localization.set(tblRA, tblLink, localization="El Ñandu")
-        return new_tag
 
     def validateActivity(self, activityName: str):
         """

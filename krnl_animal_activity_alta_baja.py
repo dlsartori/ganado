@@ -435,8 +435,12 @@ class BajaActivityAnimal(AnimalActivity):
         temp1 = getRecords('tblAnimalesTiposDeAltaBaja', '', '', None, 'fldID', 'fldName', fldAltaBaja='Baja')
         self.tipoDeBajaDict = dict(zip(temp1.getCol('fldName'), temp1.getCol('fldID')))
 
-    # TODO(cmt): Auto-call class: All instances of this calls call this method whenever referenced in the code.
-    def __call__(self, *args, **kwargs):
+    # TODO(cmt): Auto-call class: All instances of this class call this method whenever referenced in the code.
+    # def __call__(self, caller_object=None, *args, **kwargs):
+    #     self.outerObject = caller_object
+    #     return self.__perform(*args, **kwargs)
+
+    def perform(self, *args, **kwargs):
         return self.__perform(*args, **kwargs)
 
 

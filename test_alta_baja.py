@@ -5,6 +5,7 @@ from datetime import datetime
 from krnl_object_instantiation import loadItemsFromDB
 from krnl_geo_new import Geo
 from krnl_bovine import Bovine
+from krnl_db_access import writeObj, init_db_replication_triggers, SqliteQueueDatabase
 
 def moduleName():
     return str(os.path.basename(__file__))
@@ -20,6 +21,11 @@ if __name__ == '__main__':
           f'---------------------')
     USE_DAYS_MULT = False
 
+    if DB_REPLICATE:
+        trigger_tables = init_db_replication_triggers()
+        print(f'INSERT/UPDATE Triggers created for: {trigger_tables}')
+        print(f'tables_and_binding_objs: {tables_and_binding_objects}\ntables_and_methods:{tables_and_methods}.')
+
     shortList = (0, 1, 4, 8, 11, 18, 27, 32, 130, 172, 210, 244, 280, 398, 41, 61, 92, 363, 368, 372)
     bovines = loadItemsFromDB(Bovine, items=shortList, init_tags=True)
     print(f'--- Initial bovines in register: {len(Bovine.getRegisterDict().keys())} / {Bovine.getRegisterDict().keys()}')
@@ -33,7 +39,8 @@ if __name__ == '__main__':
     # tblStatus = DataTable(tblDataStatusName, fldFK_Status=1, fldDate=getNow(fDateTime))
     tblOwners = getRecords(tblPersonasName, '', '', None, '*', fldLastName=['Sartori', 'Gonzalez/Buyatti'])
     tblDataOwners = DataTable('tblDataAnimalesActividadPersonas')
-    tblLocalization = DataTable(tblLocalizationName, fldFK_Localizacion=Geo.getGeoEntities()[547])  # 547:Lote1-El Nandu
+
+    tblLocalization = DataTable(tblLocalizationName, fldFK_Localizacion=Geo.getUID('El Ñandu -Lote 1'))  # 547:Lote1-El Nandu
     for j in range(tblOwners.dataLen):
         tblDataOwners.setVal(j, fldFK_Persona=tblOwners.getVal(j, 'fldID'), fldPercentageOwnership=1/tblOwners.dataLen,
                              fldComment=tblOwners.getVal(j, 'fldLastName') + ', ' + tblOwners.getVal(j, 'fldName'))
@@ -46,12 +53,15 @@ if __name__ == '__main__':
     # Animal Dummy
     # 10# print(f'New Animal DUMMY - ID: {newAnimal.getID}  / Data: {newAnimal.__dict__}')
 
-    print(f'--- Final bovines in register: {len(Bovine.getRegisterDict().keys())} / {Bovine.getRegisterDict().keys()}')
-    print(f'--- Final Tags in register: {len(Tag.getRegisterDict().keys())} / {Tag.getRegisterDict().keys()}')
+    print(f'--- Bovines in register: {len(Bovine.getRegisterDict().keys())} / {Bovine.getRegisterDict().keys()}')
+    print(f'--- Tags in register: {len(Tag.getRegisterDict().keys())} / {Tag.getRegisterDict().keys()}')
 
     print(f'\n\n                                   ################# Baja de Animal {newAnimal.ID} ###################')
 
-    idActividadRA = newAnimal.baja('Venta')
+    idActividadRA = newAnimal.baja.perform('Venta')
+
+    print(f'--- Final bovines in register: {len(Bovine.getRegisterDict().keys())} / {Bovine.getRegisterDict().keys()}')
+    print(f'--- Final Tags in register: {len(Tag.getRegisterDict().keys())} / {Tag.getRegisterDict().keys()}')
 
     stop = 6
 

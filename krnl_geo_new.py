@@ -135,8 +135,13 @@ class Geo(TransactionalObject):
 
     @classmethod
     def getUID(cls, name: str):
-        n = removeAccents(name)
-        return next((k for k in cls.getGeoEntities() if n == removeAccents(cls.getGeoEntities()[k].name)), None)
+        name = re.sub(r'[-\\|/@#$%^*()=+¿?{}"\'<>,:;_]', ' ', name)
+        name_words = [j for j in removeAccents(name).split(" ") if j]
+        return next((k for k in cls.getGeoEntities()
+                     if all(word in removeAccents(cls.getGeoEntities()[k].name) for word in name_words)), None)
+
+        # n = removeAccents(name)
+        # return next((k for k in cls.getGeoEntities() if n == removeAccents(cls.getGeoEntities()[k].name)), None)
 
     @classmethod
     def getObject(cls, name: str):
@@ -145,7 +150,7 @@ class Geo(TransactionalObject):
         @return: Geo object if any found, None if name not found in getGeoEntities dict.
         """
         try:
-            o = cls.getGeoEntities().get(name, None)
+            o = cls.getGeoEntities().get(name, None)            # Primero busca un UUID y lo retorna si existe.
         except SyntaxError:
             return None
         if not o:

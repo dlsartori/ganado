@@ -704,10 +704,10 @@ class Activity(ABC):
         loc = tblData.getVal(0, 'fldFK_Localizacion')
         if not loc:
             loc = kwargs.get('localization', None)
-            if isinstance(loc, str):
-                loc = Geo.getObject(loc)
-            if not isinstance(loc, Geo):  # No se paso localizacion valida. Sale nomas...
-                return None
+        elif isinstance(loc, str):
+            loc = Geo.getObject(loc)
+        if not isinstance(loc, Geo):  # No se paso localizacion valida. Sale nomas...
+            return None
 
         if self._isValid and self.outerObject.validateActivity(self._activityName):
             # Prioridad eventDate:    1: fldDate(tblData); 2: kwargs(fecha valida); 3: timeStamp.
@@ -719,7 +719,7 @@ class Activity(ABC):
             activityID = tblRA.getVal(0, 'fldFK_NombreActividad')
             activityID = activityID if activityID else self._activityID
             tblRA.setVal(0, fldFK_NombreActividad=activityID)
-            tblData.setVal(0, fldFK_Localizacion=loc, fldFK_NivelDeLocalizacion=loc.localizLevel, fldDate=eventDate)
+            tblData.setVal(0, fldFK_Localizacion=loc.ID, fldFK_NivelDeLocalizacion=loc.localizLevel, fldDate=eventDate)
 
             if self.outerObject.supportsMemData:  # parametros para actualizar variables en memoria se pasan en
                 tblData.setVal(0, fldMemData=1)         # Activa flag Memory Data en el registro que se escribe en DB

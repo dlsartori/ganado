@@ -1,4 +1,7 @@
 *.rar
+*.log
+*.db-shm
+*.db-wal
 GanadoSQLite.db
 
 # Byte-compiled / optimized / DLL files

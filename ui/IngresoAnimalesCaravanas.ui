@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
- <class>Dialog</class>
- <widget class="QDialog" name="Dialog">
+ <class>dlgIngresoAnimalesCaravanas</class>
+ <widget class="QDialog" name="dlgIngresoAnimalesCaravanas">
   <property name="enabled">
    <bool>true</bool>
   </property>
@@ -86,10 +86,10 @@
     <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
    </property>
    <property name="buddy">
-    <cstring>txt_2</cstring>
+    <cstring>txtBuscar</cstring>
    </property>
   </widget>
-  <widget class="QLineEdit" name="txt_2">
+  <widget class="QLineEdit" name="txtBuscar">
    <property name="enabled">
     <bool>false</bool>
    </property>
@@ -229,11 +229,11 @@
    <attribute name="verticalHeaderVisible">
     <bool>false</bool>
    </attribute>
-   <attribute name="verticalHeaderDefaultSectionSize">
-    <number>15</number>
-   </attribute>
    <attribute name="verticalHeaderMinimumSectionSize">
     <number>10</number>
+   </attribute>
+   <attribute name="verticalHeaderDefaultSectionSize">
+    <number>15</number>
    </attribute>
    <attribute name="verticalHeaderStretchLastSection">
     <bool>false</bool>
@@ -277,16 +277,16 @@
    <attribute name="verticalHeaderVisible">
     <bool>false</bool>
    </attribute>
-   <attribute name="verticalHeaderDefaultSectionSize">
-    <number>15</number>
-   </attribute>
    <attribute name="verticalHeaderMinimumSectionSize">
     <number>10</number>
+   </attribute>
+   <attribute name="verticalHeaderDefaultSectionSize">
+    <number>15</number>
    </attribute>
   </widget>
  </widget>
  <tabstops>
-  <tabstop>txt_2</tabstop>
+  <tabstop>txtBuscar</tabstop>
   <tabstop>tableViewLeft</tabstop>
   <tabstop>btnToRight</tabstop>
   <tabstop>btnToLeft</tabstop>

@@ -677,7 +677,7 @@ class GenericActivityAnimal(AnimalActivity):                # GenericActivity Cl
         """
         if not callable(method_obj):
             return None
-        setattr(self, method_obj.__name__, self.methods_wrapper(method_obj))
+        setattr(self, method_obj.__name__, self.methods_wrapper(method_obj))  # sets decorated method as the callable.
         return True
 
     def methods_wrapper(self, func):
@@ -828,7 +828,7 @@ class StatusActivityAnimal(AnimalActivity):
                 'recordInventory'=True/False -> Overrides Activity setting of variable _isInventoryActivity
         @return: ID_Actividad (Registro De Actividades) if success; errorCode (str) on error; None for nonValid
         """
-        tblLink = next((j for j in args if isinstance(j, DataTable) and j.tblName == self.__tblLinkName), None)
+        tblLink = next((j for j in args if isinstance(j, DataTable) and j.tblName == self._tblLinkName), None)
         if tblLink is None:
             args = list(args)
             tblLink = DataTable(self.__tblLinkName)
@@ -1433,16 +1433,16 @@ class TagActivityAnimal(AnimalActivity):
                     if t.assignedToClass != self.outerObject.__class__.__name__:
                         # Actualiza tblCaravanas con fldAssignedToClass=Nombre de clase del objeto al que se asigna t
                         if t.ID in idCol:
-                            _ = setRecord(self.__tblObjectsName, fldObjectUID=t.ID,
+                            _ = setRecord(self.__tblObjectsName, fldID=t.recordID,
                                           fldAssignedToClass=self.outerObject.__class__.__name__)
                             if isinstance(_, str):
                                 retValue = f'ERR_DBWrite: Cannot write table {self.__tblObjectsName}'
                                 krnl_logger.error(retValue, stack_info=True)
-                                break   # Continua a procesar el siguiente tag.
+                                continue   # Continua a procesar el siguiente tag.
                             else:
                                 t.assignedToClass = self.outerObject.__class__.__name__
                         else:
-                            retValue = f'ERR_Sys: Tag ID {t.ID} not found in DB'
+                            retValue = f'ERR_Sys: Tag Number {t.tagNumber} / ID={t.ID} not found in DB'
                             krnl_logger.error(retValue, stack_info=True)
                             break   # Continua a procesar el siguiente tag.
 
