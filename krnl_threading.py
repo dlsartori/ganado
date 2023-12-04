@@ -7,8 +7,7 @@ from krnl_config import timerWrapper, bkgd_logger, connCreate, time_mt, print, D
 from datetime import datetime, timedelta
 import threading
 from krnl_db_access import SqliteQueueDatabase
-# from krnl_entityObject import EntityObject                      # Needed to pull processReplicated() deque
-# from krnl_transactionalObject import TransactionalObject        # Needed to pull processReplicated() deque
+from krnl_entityObject import EntityObject      # Uses ActivityCleanup() to cleanup outerAttr dict. on exiting threads.
 from krnl_abstract_base_classes import AbstractFactoryBaseClass
 from time import sleep
 # import functools
@@ -76,11 +75,11 @@ class IntervalTimer(Timer):
         self.__startSecs = 0.0  # Este tiempo en segundos lo setea el launcher del thread, para evitar reentradas.
         self.__startHour = start_hour
         if schedule:  # Setea interval a valores predeterminados.
-            interval = interval if interval < self.__MAX_INTERVAL else self.__MAX_INTERVAL
+            interval = interval if interval <= self.__MAX_INTERVAL else self.__MAX_INTERVAL
             loopList = sorted(list(self.allowedThreads.keys()), reverse=True)
             # print(f'+++++++++++++ loopllist: {loopList}')
             for i in loopList:
-                if interval >= i:
+                if interval >= i:           # sets __interval to a value that is allowed by the scheduling logic.
                     if self.__activeThreadCounter[i] < self.allowedThreads[i]:
                         self.__interval = interval - (interval % i)      # (interval // i) * i
                         self.__startSecs = self.__startSeconds[i][self.__activeThreadCounter[i]]
@@ -261,7 +260,13 @@ class IntervalFuncsFactory(AbstractFactoryBaseClass):     # Concrete Factory #1:
                                  start_thread=start_thread, **kwargs)  # Crea y Retorna obj IntervalFunctions
 # ========================================= End IntervalFuncsFactory ============================================= #
 
+
 class IntervalFunctions(object):
+    """ Class implements:
+         - Addition and removal of functions in the IntervalTimer Threads.
+         - Start/Stop of functions running in IntervalTimer Threads (individual funcs. can be suspended and re-started)
+         - Code to start and kill IntervalTimer Threads.
+    """
     __rlock = RLock()
     __objectsIF = set()     # Registro de objetos IntervalFunctions (set). Ver donde y como usar...
 
@@ -313,17 +318,18 @@ class IntervalFunctions(object):
 
     def startThread(self):
         try:
-            # if not self.thread.is_alive():
-            self.thread.start()
+            if not self.thread.is_alive():
+                self.thread.start()
         except (AttributeError, NameError, TypeError):
             pass
 
     def killThread(self):
         try:
             if self.thread.is_alive():
-                self.thread.cancel()     # setea flag Timer.finished=True para salir del lazo while en func. run()
+                self.thread.cancel()   # setea flag Timer.finished=True para salir del lazo while en IntervalTimer.run()
+                EntityObject.ActivityCleanup(self.thread.ident)   # Pops thread_id entry from Activity __outerAttr dict.
                 if not self.thread.daemon:  # join() de los IntervalTimer Threads que se definan como non-daemon
-                    self.thread.join(timeout=2)
+                    self.thread.join(timeout=2)  # join() waits until thread ongoing works are completed to kill thread.
         except (AttributeError, NameError, TypeError):
             pass
 
@@ -449,9 +455,12 @@ class IntervalFunctions(object):
 
 
 class DatabaseReplicationCursor(BufferAsyncCursor):
-    """ Implements the execution of methods that update memory data structures resulting from database replication, in
-    a separate thread.
+    """ Implements the execution of methods that update memory data structures (last_inventory, last_category, etc.)
+    resulting from database replication updating the data replicated in the local db tables to the memory data
+    structures. This is done in a separate thread.
     Decoupling all these db-intensive tasks from the front-end thread is the right way to go to free-up the front-end.
+    So all these activities are to be performed via AsyncBuffers and AsyncCursors.
+    These BufferAsyncCursor classes must implement, as a minimum, __init__(), format_item() and execute() methods.
     """
     _writes_to_db = MAIN_DB_NAME    # Flag to signal that the class uses db-write functions setRecord(), setRecords()
 
@@ -475,8 +484,7 @@ class DatabaseReplicationCursor(BufferAsyncCursor):
         return cls(*args, event=event, the_object=the_object, the_callable=the_callable, **kwargs)   # returns cursor.
 
     def execute(self):
-        # self._callable -> processReplicated() (for now...)
-        if callable(self._callable):
+        if callable(self._callable):        # self._callable is processReplicated() (for now...)
             # print(f'lalalalalalala execute {self.__class__.__qualname__}({lineNum()}): \n{self._callable}, '
             #       f'object: {self._object}, args: {self._args}')
             if hasattr(self._callable, "__self__"):
@@ -489,7 +497,7 @@ class DatabaseReplicationCursor(BufferAsyncCursor):
         self._args = []
         self._kwargs = {}
 
-# TODO: Final setting for thread_priority: > 15
+# Creates async memory buffer. TODO: Final setting for thread_priority: > 15
 replicateBuffer = AsyncBuffer(DatabaseReplicationCursor, autostart=True, thread_priority=10, qsize_threshold=2,
                               precedence=0)     # precedence=0 -> On exit, this queue stops LAST.
 
@@ -572,8 +580,8 @@ def minuteTasks1(obj, *args, **kwargs):
 
 @timerWrapper(iterations=10)             # Temporizar pa' ver como anda...
 def checkTriggerTables(*args, **kwargs):
-    """ Checks whether TimeStamp has changed for the rows in _sys_Trigger_Tables. For any changes, enqueues a cursor in
-    replicateBuffer with all the information needed to perform checks and updates of the memory data structures
+    """ Checks whether TimeStamp has changed for the rows in [_sys_Trigger_Tables]. For any changes, enqueues a cursor
+    in replicateBuffer with all the information needed to perform checks and updates of the memory data structures
     associated to each of the tables.
     """
     try:
@@ -599,7 +607,7 @@ def checkTriggerTables(*args, **kwargs):
         return None
 
     for k in tbl_tstamps:                          # k is DB_Table_Name
-        if tbl_tstamps[k] != checkTriggerTables.tstamps_last_values[k]:  #  and last_updated_by[k] != MAIN_DB_ID:
+        if tbl_tstamps[k] != checkTriggerTables.tstamps_last_values[k]:  # and last_updated_by[k] != MAIN_DB_ID:
             if k in tables_and_methods:
                 the_method = tables_and_methods[k]
                 checkTriggerTables.tstamps_last_values[k] = tbl_tstamps[k]  # updates TimeStamp in last_values dict.
@@ -608,7 +616,8 @@ def checkTriggerTables(*args, **kwargs):
                     if the_object:
                         print(f' hhhhhhheeeeeeeeeey Trigger Tables: AQUI ESTOY con {k}: ({tbl_tstamps[k]}, '
                               f'{last_updated_by[k]}) / '
-                              f'{the_object.__name__}.{the_method} - self?: {the_method.__self__}!!!--------------')
+                              f'{the_object.__name__}.{the_method} - self?: {the_method.__self__}!!! -- '
+                              f'{moduleName()}-{lineNum()}')
                         replicateBuffer.enqueue(the_object=the_object, the_callable=the_method)
                     else:
                         replicateBuffer.enqueue(the_callable=the_method)
@@ -619,22 +628,22 @@ def checkTriggerTables(*args, **kwargs):
 checkTriggerTables.tstamps_last_values = db_time_stamps     # {Table_Name: TimeStamp,}
 
 
-dailyFunctions = IntervalFuncsFactory.create_object(interval=1.5 if USE_DAYS_MULT else 24*3600,  # start_hour=1,
+dailyFunctions = IntervalFunctions(interval=1.5 if USE_DAYS_MULT else 24*3600,  # TODO: Setear start_hour=1,
                                                     func_list=(animalUpdates,), start_hour=0, start_thread=False)
 
-fourADayFunctions = IntervalFuncsFactory.create_object(interval=1 if USE_DAYS_MULT else 6*3600,  # start_hour=2,
+fourADayFunctions = IntervalFunctions(interval=1 if USE_DAYS_MULT else 6*3600,  # TODO: Setear start_hour=2,
                                                          func_list=(FourADay,), start_thread=False)
 
-hourlyFunctions = IntervalFuncsFactory.create_object(interval=REPORT_PERIOD/DAYS_MULT if USE_DAYS_MULT else 3600,
+hourlyFunctions = IntervalFunctions(interval=REPORT_PERIOD/DAYS_MULT if USE_DAYS_MULT else 3600,
                                                      func_list=(hourlyTasks1, hourlyTasks2), start_thread=False)
 
-minuteFunctions = IntervalFuncsFactory.create_object(interval=0.5 if USE_DAYS_MULT else 60,
+minuteFunctions = IntervalFunctions(interval=0.5 if USE_DAYS_MULT else 60,
                                                      func_list=(minuteTasks1, checkTriggerTables), start_thread=False)
 
 # minuteFunctions = IntervalFunctions(interval=0.1243 if USE_DAYS_MULT else 60, func_list=(minuteTasks1, ),
 #                                     start_thread=False)  # interval=60
 
-# secondsFunctions = IntervalFuncsFactory.create_object(interval=1, func_list=(), start_thread=False)
+# secondsFunctions = IntervalFunctions(interval=1, func_list=(), start_thread=False)
 
 
 # ========================================= End Interval Functions ================================================ #
@@ -716,6 +725,9 @@ class FrontEndHandler(object):
                 return False
             self.__running = False
             self.unregister_obj()
+
+
+        EntityObject.ActivityCleanup(self.__thread.ident)  # __outerAttr dict. cleanup: removes thread_id entry.
         print(f'ABOUT TO JOIN THREAD {self.__thread}.')
         self.__thread.join()            # sits here until self.__thread execution ends.
         return True

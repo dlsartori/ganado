@@ -80,52 +80,54 @@ class Caprine(Mammal):
     def getInventoryActivitiesDict(cls):
         return cls.__isInventoryActivity
 
-    def __init__(self, *tags: Tag, **kwargs):
-        class ArgsCaprine(BaseModel):
-            tags: list = []
-            kwargs: dict
-            # strip_str: constr(strip_whitespace=True)
-            # lower_str = constr(to_lower=True)
+    def __init__(self, *args, **kwargs):            # TODO: FIX THE VALIDATION CODE BELOW.
+        # class ArgsCaprine(BaseModel):
+        #     tags: list = []
+        #     kwargs: dict
+        #     # strip_str: constr(strip_whitespace=True)
+        #     # lower_str = constr(to_lower=True)
+        #
+        #     @validator('tags', pre=True, each_item=True, allow_reuse=True)
+        #     @classmethod
+        #     def validate_tags(cls, val):  # valida tags
+        #         val = val if hasattr(val, "__iter__") else list(val)  # Convierte val a lista si no lista
+        #         val = [j for j in val if isinstance(j, Tag) is True]  # Valida tags
+        #         # print(f'****************** VALIDATOR DE TAGS: {_}')
+        #         return val
+        #
+        #     @classmethod
+        #     @validator('kwargs', pre=False, each_item=True, allow_reuse=True)
+        #     def validate_kwargs(cls, argsDict):
+        #         # lower_keys = [str(j).strip().lower() for j in argsDict]
+        #         if {'fldID', 'fldDOB'}.issubset(argsDict):
+        #             myDOB = valiDate(next((argsDict[j] for j in argsDict if j.lower().__contains__('flddob')),None),None)
+        #             if myDOB is not None:
+        #                 myDOB = datetime.strptime(myDOB, fDateTime)
+        #             castr = next((argsDict[j] for j in argsDict if j.lower().__contains__('flagcastrado')), 0)
+        #             if castr in (0, 1):
+        #                 argsDict['fldFlagCastrado'] = castr  # Si fldFlagCastrado no esta en kwargs, se crea y setea a 0
+        #             else:
+        #                 argsDict['fldFlagCastrado'] = valiDate(castr, 1)  # valida fecha. Si es incorrecta, setea 1
+        #             mode = next((argsDict[j] for j in argsDict if j.lower().__contains__('fldmode')), 'regular')
+        #
+        #             if not myDOB:
+        #                 raise ValueError(f'ERR_INP_InvalidArgument 1')
+        #             if mode not in Animal.getAnimalModeDict():
+        #                 raise ValueError(f'ERR_INP_InvalidArgument: Animal Mode {mode} not valid.')
+        #
+        #             else:
+        #                 return argsDict
+        #         else:
+        #             raise ValueError(f'ERR_INP_InvalidArgument: ID_Animal and/or Fecha De Nacimiento are missing.')
 
-            @validator('tags', pre=True, each_item=True, allow_reuse=True)
-            @classmethod
-            def validate_tags(cls, val):  # valida tags
-                val = val if hasattr(val, "__iter__") else list(val)  # Convierte val a lista si no lista
-                val = [j for j in val if isinstance(j, Tag) is True]  # Valida tags
-                # print(f'****************** VALIDATOR DE TAGS: {_}')
-                return val
+        # user = ArgsCaprine(tags=args, kwargs=kwargs)
 
-            @validator('kwargs', pre=False, each_item=True, allow_reuse=True)
-            @classmethod
-            def validate_kwargs(cls, argsDict):
-                # lower_keys = [str(j).strip().lower() for j in argsDict]
-                if {'fldID', 'fldDOB'}.issubset(argsDict):
-                    myDOB = valiDate(next((argsDict[j] for j in argsDict if j.lower().__contains__('flddob')),None),None)
-                    if myDOB is not None:
-                        myDOB = datetime.strptime(myDOB, fDateTime)
-                    castr = next((argsDict[j] for j in argsDict if j.lower().__contains__('flagcastrado')), 0)
-                    if castr in (0, 1):
-                        argsDict['fldFlagCastrado'] = castr  # Si fldFlagCastrado no esta en kwargs, se crea y setea a 0
-                    else:
-                        argsDict['fldFlagCastrado'] = valiDate(castr, 1)  # valida fecha. Si es incorrecta, setea 1
-                    mode = next((argsDict[j] for j in argsDict if j.lower().__contains__('fldmode')), 'regular')
-
-                    if not myDOB:
-                        raise ValueError(f'ERR_INP_InvalidArgument 1')
-                    if mode not in Animal.getAnimalModeDict():
-                        raise ValueError(f'ERR_INP_InvalidArgument: Animal Mode {mode} not valid.')
-
-                    else:
-                        return argsDict
-                else:
-                    raise ValueError(f'ERR_INP_InvalidArgument: ID_Animal and/or Fecha De Nacimiento are missing.')
-
-        user = ArgsCaprine(tags=tags, kwargs=kwargs)
         try:
-            user = ArgsCaprine(tags=tags, kwargs=kwargs)
+            # user = ArgsCaprine(tags=args, kwargs=kwargs)
+            kwargs = self.validate_kwargs(kwargs)
             result = True
         except (TypeError, ValueError, ValidationError) as e:
-            print(f'{e.json()}')
+            print(f'{e}')
             result = False
 
         if result is False:
@@ -153,7 +155,7 @@ class Caprine(Mammal):
             isValid = True
             isActive = True
             self.__comment = kwargs['fldComment'] if 'fldComment' in kwargs else ''
-        super().__init__(myID, isValid, isActive, *tags, **kwargs)
+        super().__init__(*args, **kwargs)
 
         # Registra objeto (Bovine) en __registerDict, inicializa variable moduleRunning a 1. Si es generic
         # TODO: Para que la comparacion funcione, se debe tener el valor del ID generico ANTES de ejecutar por
@@ -165,6 +167,30 @@ class Caprine(Mammal):
             except (KeyError, ValueError, TypeError, IndexError, NameError):
                 # Log Error for Animal.__ID: ERR_SYS_RegisterError
                 pass
+
+    @staticmethod
+    def validate_kwargs(argsDict):
+        # lower_keys = [str(j).strip().lower() for j in argsDict]
+        if {'fldID', 'fldDOB'}.issubset(argsDict):
+            myDOB = valiDate(next((argsDict[j] for j in argsDict if j.lower().__contains__('flddob')), None), None)
+            if myDOB is not None:
+                myDOB = datetime.strptime(myDOB, fDateTime)
+            castr = next((argsDict[j] for j in argsDict if j.lower().__contains__('flagcastrado')), 0)
+            if castr in (0, 1):
+                argsDict['fldFlagCastrado'] = castr  # Si fldFlagCastrado no esta en kwargs, se crea y setea a 0
+            else:
+                argsDict['fldFlagCastrado'] = valiDate(castr, 1)  # valida fecha. Si es incorrecta, setea 1
+            mode = next((argsDict[j] for j in argsDict if j.lower().__contains__('fldmode')), 'regular')
+
+            if not myDOB:
+                raise ValueError(f'ERR_INP_InvalidArgument 1')
+            if mode not in Animal.getAnimalModeDict():
+                raise ValueError(f'ERR_INP_InvalidArgument: Animal Mode {mode} not valid.')
+
+            else:
+                return argsDict
+        else:
+            raise ValueError(f'ERR_INP_InvalidArgument: ID_Animal and/or Fecha De Nacimiento are missing.')
 
     @classmethod
     def getTotalAnimals(cls, mode=1):          # Total Bovine Animals in __registerDict.

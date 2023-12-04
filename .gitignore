@@ -2,7 +2,15 @@
 *.log
 *.db-shm
 *.db-wal
+*.1
 GanadoSQLite.db
+GanadoSQLite*.db
+GanadoSQLite_DS.db
+temp.py
+
+# Drawio
+*.bkp
+*.dtmp
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

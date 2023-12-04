@@ -156,87 +156,103 @@ class Bovine(Mammal):
     def novilloByAge(cls, val=None):
         """ getter/setter for this attribute"""
         if val is not None:
-            cls.__setNovilloByAge = val
+            cls.__setNovilloByAge = bool(val)
         return cls.__setNovilloByAge
 
 
     def __init__(self, *args, **kwargs):
 
-        class ArgsBovine(BaseModel):        # pydantic Class for argument parsing and validation
-            kwargs: dict
-            # strip_str: constr(strip_whitespace=True)
-            # lower_str: constr(to_lower=True)
+        # class ArgsBovine(BaseModel):        # pydantic Class for argument parsing and validation
+        #     kwargs: dict
+        #     # strip_str: constr(strip_whitespace=True)
+        #     # lower_str: constr(to_lower=True)
+        #
+        #     @classmethod
+        #     # @field_validator('kwargs', '', check_fields=False)
+        #     @validator('kwargs', pre=False, each_item=True, allow_reuse=True, check_fields=False)
+        #     def validate_kwargs(cls, argsDict):
+        #         myDOB = None
+        #         myfldID = None
+        #         # lower_keys = [str(j).strip().lower() for j in argsDict]
+        #         if {'fldID', 'fldDOB'}.issubset(argsDict):
+        #             # myfldID = next((argsDict[j] for j in argsDict if 'fldid' in j.lower()), None)
+        #             myDOB = kwargs.get('fldDOB', '')
+        #             if myDOB:
+        #                 if not isinstance(myDOB, datetime):
+        #                     try:
+        #                         myDOB = datetime.strptime(myDOB, fDateTime)
+        #                     except(TypeError, ValueError):
+        #                         print(f'ERR_INP_Invalid argument DOB: {myDOB}')
+        #                         raise ValueError(f'ERR_INP_InvalidArgument: Date of Birth {myDOB} - '
+        #                                          f'{moduleName()}({lineNum()})')
+        #             castr = next((argsDict[j] for j in argsDict if 'flagcastrado' in j.lower()), 0)
+        #             if castr in (0, 1):
+        #                 argsDict['fldFlagCastrado'] = castr  # Si fldFlagCastrado no esta en kwargs lo crea y setea a 0
+        #             else:
+        #                 argsDict['fldFlagCastrado'] = valiDate(castr, 1)  # valida fecha. Si es incorrecta, setea 1
+        #             mode = str(next((kwargs[j] for j in kwargs if 'mode' in str(j).lower()), None)).lower()
+        #             if mode not in Animal.getAnimalModeDict():
+        #                 raise ValueError(f'ERR_UI_InvalidArgument: Animal Mode {mode} not valid. - '
+        #                                  f'{moduleName()}({lineNum()})')
+        #             else:
+        #                 return argsDict
+        #         else:
+        #             raise ValueError(f'ERR_UI_InvalidArgument: ID_Animal and/or Animal DOB are missing. '
+        #                              f'kwargs:{kwargs} / argsDict: {argsDict} / ID: {myfldID} / dob: {myDOB}')
 
-
-            @field_validator('kwargs', '', check_fields=False)
-            @classmethod
-            def validate_kwargs(cls, argsDict):
-                myDOB = None
-                myfldID = None
-                # lower_keys = [str(j).strip().lower() for j in argsDict]
-                if {'fldID', 'fldDOB'}.issubset(argsDict):
-                    myfldID = next((argsDict[j] for j in argsDict if j.lower().__contains__('fldid')), None)
-                    myDOB = kwargs.get('fldDOB', None)
-                    if myDOB:
-                        if not isinstance(myDOB, datetime):
-                            try:
-                                myDOB = datetime.strptime(myDOB, fDateTime)
-                            except(TypeError, ValueError):
-                                print(f'fldID WITH ERROR: {myfldID}')
-                                raise ValueError(f'ERR_INP_InvalidArgument: Date of Birth {myDOB} - '
-                                                 f'{moduleName()}({lineNum()})')
-                    castr = next((argsDict[j] for j in argsDict if j.lower().__contains__('flagcastrado')), 0)
-                    if castr in (0, 1):
-                        argsDict['fldFlagCastrado'] = castr  # Si fldFlagCastrado no esta en kwargs, se crea y setea a 0
-                    else:
-                        argsDict['fldFlagCastrado'] = valiDate(castr, 1)  # valida fecha. Si es incorrecta, setea 1
-                    mode = str(next((kwargs[j] for j in kwargs if str(j).lower().__contains__('mode')), None)).lower()
-                    if mode not in Animal.getAnimalModeDict():
-                        raise ValueError(f'ERR_UI_InvalidArgument: Animal Mode {mode} not valid. - '
-                                         f'{moduleName()}({lineNum()})')
-                    else:
-                        return argsDict
-                else:
-                    raise ValueError(f'ERR_UI_InvalidArgument: ID_Animal and/or Fecha De Nacimiento are missing. '
-                                     f'kwargs:{kwargs} / argsDict: {argsDict} / ID: {myfldID} / dob: {myDOB}')
-
-        # user = ArgsBovine(kwargs=kwargs)
         try:
-            user = ArgsBovine(kwargs=kwargs)
-            parseResult = True
-        except (TypeError, ValueError, ValidationError) as e:
-            print(f'{e.json()}')
-            parseResult = False
+            # user = ArgsBovine(kwargs=kwargs)
+            kwargs = self.validate_arguments(kwargs)
+        except (TypeError, ValueError) as e:
+            krnl_logger.info(f'{e} - Object not created!.')
+            del self  # Removes invalid/incomplete Bovine object
+            return
 
-        mode = str(next((kwargs[j] for j in kwargs if str(j).lower().__contains__('mode')), None)).lower()
-        if mode.__contains__('generic') and self.__genericAnimalID is not None:
+        mode = next((str(kwargs[j]).lower().strip() for j in kwargs if 'mode' in str(j).lower()), None)
+        if 'generic' in mode.lower() and self.__genericAnimalID is not None:
             retValue = 'ERR_Inp_InvalidObject: Generic Animals can only have one instance. Object not created'
             krnl_logger.error(retValue)
             raise ValueError(retValue)          # Solo 1 objeto Generic se puede crear.
 
-        if parseResult is False:                        # or kwargs.get('factoryKey') != __factoryKey:
-            isValid = False  # Sale con __isValidFlag = False
-            isActive = False     # No se puede crear un tag valido faltando alguno de estos argumentos.
-            myID = False
-            self.__flagCastrado = None
-            self.__comment = f'{moduleName()}({lineNum()}) - Invalid Animal Object - {callerFunction()}'
-            self.__myTags = []
-        else:
-            myID = kwargs.get('fldID')
-            self.__flagCastrado = kwargs.get('fldFlagCastrado')
-            isValid = True
-            isActive = True
-            self.__comment = kwargs.get('fldComment', '')
-            kwargs['memdata'] = True  # Habilita datos en memoria (_getCategory, getStatus, _getInventory) en EntityObject
+        self.__flagCastrado = kwargs.get('fldFlagCastrado')
+        self.__comment = kwargs.get('fldComment', '')
+        kwargs['memdata'] = True  # Habilita datos en memoria (_getCategory, getStatus, _getInventory) en EntityObject
 
-        super().__init__(myID, isValid, isActive, *args, **kwargs)
+        super().__init__(*args, **kwargs)
 
 
     # __categoryObject = CategoryActivity()
     # @property
     # def category(self):
-    #     self.__categoryObject.outerObject = self  # Pasa objeto para ser usado por set, get, etc.
-    #     return self.__categoryObject  # Retorna objeto __categoryObject para acceder metodos en CategoryActivity
+    #     self.__categoryObject.outerObject = self  # Pasa objeto Bovine para ser usado por set, get, etc.
+    #     return self.__categoryObject     # Retorna Activity object pare acceder metodos en CategoryActivity
+
+    @staticmethod
+    def validate_arguments(argsDict):
+        # Animal Category is not required here. It will be derived from M/F, Castration status and age for each object.
+        # DOB required for Bovines. Other Animals may not require dob.
+        dob = next((argsDict[k] for k in argsDict if 'flddob' in str(k).lower()), '')
+        if not isinstance(dob, datetime):
+            try:
+                dob = datetime.strptime(dob, fDateTime)
+            except(TypeError, ValueError):
+                err_str = f'ERR_INP_Invalid or missing argument DOB: {dob}'
+                print(err_str, dismiss_print=DISMISS_PRINT)
+                raise ValueError(f'{err_str} - {moduleName()}({lineNum()})')
+
+        key, castr = next(((k, argsDict[k]) for k in argsDict if 'castrad' in k.lower()), (None, 0))
+        if castr in (0, 1, True, False, None):          # 1: Castrated, but castration date not known.
+            argsDict[key] = bool(castr) * 1  # Si fldFlagCastrado no esta en kwargs, se crea y setea a 0
+        else:
+            argsDict[key] = valiDate(castr, 0)  # verifica si es fecha. Si fecha no es valida, asume NO Castrado (0).
+        key, mode = next(((k.lower(), str(argsDict[k]).lower()) for k in argsDict if 'mode' in str(k).lower()),
+                         (None, 'regular'))         # if mode not passed defaults to 'regular' Animal.
+        if mode not in Animal.getAnimalModeDict():
+            raise ValueError(f'ERR_UI_InvalidArgument: Animal Mode {mode} not valid. - '
+                             f'{moduleName()}({lineNum()})')
+        else:
+            argsDict[key] = mode
+            return argsDict
 
 
     @classmethod
@@ -247,11 +263,11 @@ class Bovine(Mammal):
         kwargs: 'enforce'=True enforces category regardless of dob.
         @return: idAnimal if category changed. None if category is unchanged.
         """
-        if type(dob) in (int, float):
+        if isinstance(dob, (int, float)):
             pass
-        elif type(dob) is str:
+        elif isinstance(dob, str):
             dob = time.strptime(dob, '%Y-%m-%d %H:%M:%S.%f')
-        elif type(dob) is datetime:
+        elif isinstance(dob, datetime):
             dob = dob.timestamp()
         else:
             retValue = f'INFO_Inp_InvalidArguments: {dob}'

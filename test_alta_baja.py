@@ -1,15 +1,18 @@
 from krnl_config import *
 from krnl_tag import Tag
-from custom_types import getRecords, DataTable
+from custom_types import getRecords, DataTable, close_db_writes
 from datetime import datetime
 from krnl_object_instantiation import loadItemsFromDB
 from krnl_geo_new import Geo
 from krnl_bovine import Bovine
-from krnl_db_access import writeObj, init_db_replication_triggers, SqliteQueueDatabase
+try:
+    import psutil           # These 2 used to query total memory used by application.
+    import os
+except ImportError:
+    pass
 
 def moduleName():
     return str(os.path.basename(__file__))
-
 
 if __name__ == '__main__':
     tblDataCategoryName = 'tblDataAnimalesCategorias'
@@ -20,11 +23,6 @@ if __name__ == '__main__':
     print(f'                                             ----------------------------  Test de alta() ---------'
           f'---------------------')
     USE_DAYS_MULT = False
-
-    if DB_REPLICATE:
-        trigger_tables = init_db_replication_triggers()
-        print(f'INSERT/UPDATE Triggers created for: {trigger_tables}')
-        print(f'tables_and_binding_objs: {tables_and_binding_objects}\ntables_and_methods:{tables_and_methods}.')
 
     shortList = (0, 1, 4, 8, 11, 18, 27, 32, 130, 172, 210, 244, 280, 398, 41, 61, 92, 363, 368, 372)
     bovines = loadItemsFromDB(Bovine, items=shortList, init_tags=True)
@@ -53,15 +51,22 @@ if __name__ == '__main__':
     # Animal Dummy
     # 10# print(f'New Animal DUMMY - ID: {newAnimal.getID}  / Data: {newAnimal.__dict__}')
 
-    print(f'--- Bovines in register: {len(Bovine.getRegisterDict().keys())} / {Bovine.getRegisterDict().keys()}')
-    print(f'--- Tags in register: {len(Tag.getRegisterDict().keys())} / {Tag.getRegisterDict().keys()}')
+    print(f'--- Final bovines in register: {len(Bovine.getRegisterDict().keys())} / {Bovine.getRegisterDict().keys()}')
+    print(f'--- Final Tags in register: {len(Tag.getRegisterDict().keys())} / {Tag.getRegisterDict().keys()}')
+    try:
+        process = psutil.Process(os.getpid())
+        print(f'\n+++++++++++++++++++++  Total memory used by process (MB): {process.memory_info().rss/(1024 * 1024)}.')
+    except (AttributeError, NameError):
+        pass
+
+
 
     print(f'\n\n                                   ################# Baja de Animal {newAnimal.ID} ###################')
 
-    idActividadRA = newAnimal.baja.perform('Venta')
+    idActividadRA = newAnimal.baja('Venta')
 
-    print(f'--- Final bovines in register: {len(Bovine.getRegisterDict().keys())} / {Bovine.getRegisterDict().keys()}')
-    print(f'--- Final Tags in register: {len(Tag.getRegisterDict().keys())} / {Tag.getRegisterDict().keys()}')
+
+    close_db_writes()       # Flushes all buffers, writes all data to DB and suspends db write operations.
 
     stop = 6
 

@@ -66,7 +66,7 @@ class BovineFactory(AnimalFactory):     # Concrete Factory #2.TODO(cmt): Se va a
         @param kwargs: Dict of parameters for object construction
         @return: Object or errorCode if error
         """
-        # TODO: Validate kwargs with pydantic:
+        # TODO: Validate kwargs:
         #  (fldID=None, fldMF=str(tblObjects.getVal(0, 'fldMF')),
         #  fldFK_ClaseDeAnimal=animalClassID, fldFlagCastrado=(1 if categoryName in __castrados else 0),
         #  fldCountMe=countMe, fldDOB=tblObjects.getVal(0, 'fldDOB'),

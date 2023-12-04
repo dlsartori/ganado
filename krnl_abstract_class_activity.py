@@ -86,10 +86,13 @@ class Activity(ABC):
                  '__tblObjectsName', '_memFuncBusy'
                  )
 
+
+
     def __init_subclass__(cls, **kwargs):
-        try:        # Uses __ to ensure method_name is not inherited, then must check for name-mangling in getattr()
+        try:        # Uses __ to ensure __method_name is not inherited, then must check for name-mangling in getattr()
             if getattr(cls, '_' + cls.__name__ + '__method_name') is not None:  # _method is inherited-> creates a mess.
                 cls.register_class()       # Only registers classes with a valid method name.
+
         except (AttributeError, NameError):
             print(f'UUUUUUUUUUUUUHH Activity.__init_subclass__(): No __method_name for {cls} - {moduleName()}({lineNum()})')
         super().__init_subclass__(**kwargs)
@@ -105,7 +108,6 @@ class Activity(ABC):
     @classmethod
     def register_class(cls):
         cls._activity_class_register.add(cls)           # Accesses the right _activity_class_register
-
 
     @classmethod
     def get_class_register(cls):
@@ -313,6 +315,17 @@ class Activity(ABC):
         @param obj: not None -> added to __outerAttr dict. """
         if obj is not None:
             self.__outerAttr[threading.current_thread().ident] = obj      # TODO: Is this line thread-safe?? Check..
+
+
+    def _pop_outerAttr_key(self, thread_id):            # Private method. Not meant for general use.
+        """ This one is important: when a thread is shutdown, this function must be called for all the active Activity
+        objects so that the __outerAttr entry for that thread is removed from the Activity object dictionary.
+        This prevents __outerAttr dictionary from growing too large as threads are created and killed throughout the
+        running life of the program.
+        @return: thread.ident() value (int) if found in __outerAttr dictionary. None of thread_id not found.
+        """
+        return self.__outerAttr.pop(thread_id, None)
+
 
     @property
     def shortName(self):

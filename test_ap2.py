@@ -1,9 +1,9 @@
 import threading
 from krnl_config import *
 from datetime import timedelta
-from custom_types import DataTable, getRecords, setRecord, setupArgs
+from custom_types import DataTable, getRecords, setRecord, setupArgs, close_db_writes
 # from krnl_sqlite import SQLiteQuery, getTableInfo
-from krnl_db_access import writeObj, init_db_replication_triggers, SqliteQueueDatabase
+from krnl_db_access import writeObj, init_db_replication_triggers, SqliteQueueDatabase, init_database
 from krnl_object_instantiation import loadItemsFromDB
 from krnl_bovine import Bovine
 from krnl_abstract_class_animal import Animal       # Pa' ejecutar paCreateActivity()
@@ -15,7 +15,7 @@ from krnl_animal_activity import AnimalActivity, ProgActivityAnimal, GenericActi
 from krnl_async_buffer import AsyncBuffer
 from krnl_abstract_class_prog_activity import ActivityTrigger, ProgActivity
 from krnl_geo_new import Geo
-# from fibooks import info, balance_sheet, income_statement, excel_parser, other
+from threading import current_thread
 
 flds = ["fldID", "fldDate", "fldFK_NombreActividad", "fldFK_ClaseDeAnimal", "fldPAData", "fldWindowLowerLimit",
         "fldDiasParaEjecucion", "fldWindowUpperLimit", "fldDaysToAlert", "fldDaysToExpire", "fldComment"]
@@ -120,11 +120,11 @@ if __name__ == "__main__":
     tblLinkPA = DataTable("tblLinkAnimalesActividadesProgramadas")
     tblRAP = DataTable("tblAnimalesRegistroDeActividadesProgramadas")
 
-    if DB_REPLICATE:
-        trigger_tables = init_db_replication_triggers()
-        print(f'INSERT/UPDATE Triggers created for: {trigger_tables}')
-        print(f'tables_and_binding_objs: {tables_and_binding_objects}\ntables_and_methods:{tables_and_methods}.')
-
+    # if DB_REPLICATE:
+    #     trigger_tables = init_db_replication_triggers()
+    #     print(f'INSERT/UPDATE Triggers created for: {trigger_tables}')
+    #     print(f'tables_and_binding_objs: {tables_and_binding_objects}\ntables_and_methods:{tables_and_methods}.')
+    # init_database()
 
     print(f'\nAnimal Activities defined: {[j.__name__ for j in AnimalActivity.get_class_register()]}')
     print(f'Tag Activities defined: {[j.__name__ for j in TagActivity.get_class_register()]}\n')
@@ -143,9 +143,11 @@ if __name__ == "__main__":
     # Checks registration and execution of externally-defined functions that are added to the GenericActivity objects.
     Animal.GenActivity_register_func(property_name='weaning', func_object=tit_count)
     bovines[0].weaning.tit_count(tit_number=15)
+    bovines[0].inventory._pop_outerAttr_key(current_thread().ident)
     bovines[0].weaning.get()
 
     bovines[0].inventory.get()
+    close_db_writes()  # Flushes all buffers, writes all data to DB and suspends db write operations.
     exit(0)
 
 
@@ -175,8 +177,9 @@ if __name__ == "__main__":
                 print(f'                                    ### {j}: {j.localization.get().name}')
 
     print(f'~~~~~~~~~~~~~~~~~~~ Total number of threads running: {threading.active_count()}')
-    AsyncBuffer.flush_all()
-    SqliteQueueDatabase.stop_all_writers()
+    close_db_writes()    # Flushes all buffers, writes all data to DB and suspends db write operations.
+
+
 
 
 # ----------------------------------------------------------------------------------------------------------------- #

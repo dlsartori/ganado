@@ -210,20 +210,21 @@ class Animal(Asset):
 
     def __init__(self, *args, **kwargs):
         self.__myTags = set()
-        dob = kwargs.get('fldDOB', None)
+        self._fldDOB = kwargs.get('fldDOB', None)        # dob is None for Animal classes that don't required  DOB.
         myID = kwargs.get('fldObjectUID', None)
-        self.__recordID = kwargs.get('fldID')
+        self.__recordID = kwargs.get('fldID', None)
         try:
             _ = UUID(myID)
         except(TypeError, ValueError):
-            raise ValueError(f'ERR_TypeError: invalid/malformed UUID {myID}. Animal object cannot be created.')
-        if kwargs.get('fldMF', '').lower() not in ('m', 'f') or not kwargs.get('fldFK_ClaseDeAnimal') or not dob:
-            raise TypeError('ERR_TypeError: Cannot create Animal object.')
+            del self
+            raise ValueError(f'ERR_INP: invalid/malformed UUID {myID}. Animal object cannot be created.')
 
+        if kwargs.get('fldMF', '').lower() not in ('m', 'f') or not kwargs.get('fldFK_ClaseDeAnimal'):
+            del self
+            raise TypeError('ERR_INP_Invalid or missing M/F status and/or Animal class . Animal object not created!')
 
-        self._fldDOB = dob  # dob es datetime, por consistencia.
         # self._ageDaysDeviation = kwargs.get('fldAgeDaysDeviation', 0)       # What is this needed for??
-        self._fldMF = kwargs['fldMF'].lower()
+        self._fldMF = kwargs.get('fldMF').lower()
         self._timeStamp = kwargs.get('fldTimeStamp', None)    # Esta fecha se usa para gestionar objetos repetidos.
         self._fldFlagCastrado = int(kwargs.get('fldFlagCastrado')) if kwargs.get('fldFlagCastrado') else 0
         animalClassID = next((kwargs[j] for j in kwargs if 'animalclass' in j.lower() or 'clasedeanim' in j.lower())
@@ -235,13 +236,17 @@ class Animal(Asset):
 
         isValid = True
         isActive = True
-        self._mode = kwargs.get('fldMode', 'regular')
-        self._mode = self._mode if self._mode in self.__animalMode else 'regular'
-        # countMe: Flag 1 / 0 para indicar si objeto se debe contar o no.
-        #  1: Regular Animal;
-        #  0: Substitute (Animal creado por Reemision de Caravana); External Animal; Generic Animal
-        # -1: Dummy (Creado por perform de un Animal Substitute)
-        self.__countMe = Animal.__animalMode[self._mode]
+        self._mode = kwargs.get('fldMode', '').lower()
+        try:
+            self._mode = self._mode.lower() if self._mode.lower() in self.__animalMode else 'regular'
+            # countMe: Flag 1 / 0 para indicar si objeto se debe contar o no.
+            #  1: Regular Animal;
+            #  0: Substitute (Animal creado por Reemision de Caravana); External Animal; Generic Animal
+            # -1: Dummy (Creado por perform de un Animal Substitute)
+            self.__countMe = Animal.__animalMode[self._mode]
+        except AttributeError:
+            self._mode = None       # _mode is None for Animal classes that don't implement the mode attribute.
+            self.__countMe = 1      # __countMe is always one if mode is not implemented.
 
         # list of progActivities active for object. Loaded from DB and then updated by the system.
         # TODO(cmt): Each node initializes and loads ONLY ProgActivities created by this node in __myProgActivities.
@@ -262,11 +267,12 @@ class Animal(Asset):
 
         self.__identifiers = kwargs.get('fldIdentifiers') or set()
         if self.__identifiers:
-            self.__identifiers = set(self.__identifiers)
+            self.__identifiers = set(self.__identifiers)        # turns list read from DB into set().
             # print(f'self.__identifiers: {self.__identifiers}', dismiss_print=DISMISS_PRINT)
 
         # TODO: self.__tagRegisterDict Tag RegisterDict del tipo de tag usado por este animal.PASAR ESTO a funcion()
-        if 'new_object' not in kwargs:      # to skip all this if the Animal is not being created from DB.
+        if 'fresh_obj' not in kwargs or kwargs.get('fresh_obj') is False:
+            # Runs this code only if the Animal is created from DB (NOT fresh).
             # Setea lastInventory, lastStatus, lastLocalization, lastCategory y pasa a EntityObject.__init__()
             animalActivitiesLinkTbl = getRecords(self.tblLinkName(), '', '', None, '*', fldFK=myID)
             if isinstance(animalActivitiesLinkTbl, DataTable) and animalActivitiesLinkTbl.dataLen and \
@@ -315,13 +321,12 @@ class Animal(Asset):
         kwargs['lastCategory'] = lastCateg
         super().__init__(myID, isValid, isActive, *args, **kwargs)   # Llama a Asset.__init__()
 
-    # ---------------------------------------------------Fin __init__() ------------------------------------------ #
-
+    # -----------Fin __init__() ----------- #
 
     def __repr__(self):                 # self.getCategories() gets the right __categories dictionary.
         return "[{}; Tags:{}; Age:{:.1f}]".format(self.categoryName(),
                                 str([t.tagNumber for t in self.myTags]).replace("[", "").replace("]", "") or None,
-                                self.age.get())         # age value defined at runtime.
+                                self.age.get())         # age.get() computes age value at runtime.
 
     def updateAttributes(self, **kwargs):
         """ Updates object attributes with values passed in attr_dict. Values not passed leave that attribute unchanged.
@@ -1553,15 +1558,15 @@ class Mammal(Animal):
     __objClass = 4
     __objType = 1
 
-    def __init__(self, ID, isValid, isActive, *args, **kwargs):
-        super().__init__(ID, isValid, isActive, *args, **kwargs)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
 
 class Birds(Animal):
     __objClass = 6
     __objType = 1
 
-    def __init__(self, ID, isValid, isActive, *args, **kwargs):
-        super().__init__(ID, isValid, isActive, *args, **kwargs)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
 

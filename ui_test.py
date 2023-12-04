@@ -2,6 +2,7 @@ from PyQt6.QtWidgets import QApplication, QDialog, QMainWindow
 from PyQt6 import QtCore
 from PyQt6.QtCore import Qt
 import sys
+# https://stackoverflow.com/questions/35950050/how-to-import-python-file-located-in-same-subdirectory-in-a-pycharm-project
 from ui.Test import Ui_MainWindow
 from custom_types import DataTable, getRecords, setRecord
 
@@ -34,7 +35,6 @@ class TableModel(QtCore.QAbstractTableModel):
         # the length (only works if all rows are an equal length)
         return len(self._data[0])
 
-
 def bovine_test():
     data = [[11, 12, 13, 14, 15],
             [21, 22, 23, 24, 25],
@@ -47,25 +47,20 @@ def bovine_test():
     tblActividadesNombresBov = getRecords('tblAnimalesActividadesNombres', '', '', None, 'fldID',
                               'fldFK_ClaseDeAnimal', 'fldName', 'fldNivelRequerido', 'fldFlag', 'fldFlagPA')
 
-    # print(f'Key Field Names for table {tblCategoria.tblName}: {tblCategoria.fldNames}')
-    # print(f'DB Field Names  for table {tblCategoria.tblName}: {tblCategoria.dbFldNames}')
-    # print(f'Field Name Map  for table {tblCategoria.tblName}: {tblCategoria.fldMap()}')
-    # print(f'Unpacking item {tblCategoria.tblName}(0): {tblCategoria.unpackItem(0)}')
-    # print(f'Iterating over table {tblCategoria.tblName}: ')
-    # print(f'{tblCategoria.fldNames}')
-    # for i in range(tblCategoria.dataLen):
-    #     print(f'{tblCategoria.dataList[i]}')
+    print(f'Key Field Names for table {tblCategoria.tblName}: {tblCategoria.fldNames}')
+    print(f'DB Field Names  for table {tblCategoria.tblName}: {tblCategoria.dbFldNames}')
+    print(f'Field Name Map  for table {tblCategoria.tblName}: {tblCategoria.fldMap()}')
+    print(f'Unpacking item {tblCategoria.tblName}(0): {tblCategoria.unpackItem(0)}')
+    print(f'Iterating over table {tblCategoria.tblName}: ')
+    print(f'{tblCategoria.fldNames}')
+    for i in range(tblCategoria.dataLen):
+        print(f'{tblCategoria.dataList[i]}')
 
     # setRecord('tblAnimalesCategorias', **tblCategoria.unpackItem(0))
     # tblCategoria.setRecords()
     app = QApplication(sys.argv)
     dialog = MyDialog()
-
-    # model = TableModel(data)
-    # model = TableModel(tblAnimalesClases.dataList)
-    model = TableModel(tblCategoria.dataList)
-    # model = TableModel(tblActividadesNombresBov.dataList)
-
+    model = TableModel(tblActividadesNombresBov.dataList)
     dialog.tableViewAnimales.setModel(model)
     dialog.show()
     # dialog.activateWindow()

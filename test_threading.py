@@ -1,18 +1,22 @@
 import sys
 from krnl_db_access import writeObj, init_db_replication_triggers, SqliteQueueDatabase
+from custom_types import close_db_writes
 from krnl_threading import REPORT_PERIOD, IntervalFunctions, dailyFunctions, FrontEndHandler
-# from krnl_entityObject import EntityObject
-# from krnl_transactionalObject import TransactionalObject
 from krnl_object_instantiation import loadItemsFromDB
 from krnl_async_buffer import AsyncBuffer       # Used to issue stop() to all buffers writers.
 from krnl_bovine import Bovine, Animal
-from fe_bovine import bovine_frontend           # Front end function.
+# from fe_bovine import bovine_frontend           # Front end function.
 from krnl_person import Person
 from krnl_config import *
 from datetime import datetime
 from time import sleep, perf_counter
 import threading
 from krnl_sqlite import __fldNameCounter
+try:
+    import psutil           # These 2 used to query total memory used by application.
+    import os
+except ImportError:
+    pass
 
 def moduleName():
     return str(os.path.basename(__file__))
@@ -30,14 +34,12 @@ if __name__ == '__main__':
     krnl_logger.info(f'======================================= End loadItemsFromDB =================================='
                      f'=========')
 
-    init_db_replication_triggers()
-
     initialCat = {}
     t1 = t2 = 0  # medidores de tiempo del lazo for.
     days = 15  # Numero de dias a setear Inventario, Categoria, contados desde t0.
 
-    bovine_fe_obj = FrontEndHandler(bovine_frontend)  # Can pass *args, **kwargs for bovine_frontend here.
-    FrontEndHandler.main_loop_launch()              # Lanza thread con interfaz de usuario (front end).
+    # bovine_fe_obj = FrontEndHandler(bovine_frontend)  # Can pass *args, **kwargs for bovine_frontend here.
+    # FrontEndHandler.main_loop_launch()              # Lanza thread con interfaz de usuario (front end).
 
     t0 = time_mt()                          # tiempo referencia para DOB, Inventario, _setCategory(), EN SEGUNDOS..
 
@@ -79,7 +81,13 @@ if __name__ == '__main__':
         print(f'MAIN THREAD> - {f.thread.name} Launching {f.thread.function.__name__}() / '
               f'Daemon: {f.thread.daemon} / Interval: {f.thread.interval}')
 
-    print(f'...INTERVALTIMER THREADS...\n')
+    try:
+        process = psutil.Process(os.getpid())
+        print(f'\n+++++++++++++++++++++  Total memory used by process (MB): {process.memory_info().rss/(1024 * 1024)}.')
+    except (AttributeError, NameError):
+        pass
+
+    print(f'\n...INTERVALTIMER THREADS...')
     print(f'MAIN THREAD> Years simulated: {sleepAmount * DAYS_MULT / 365} / 1 second = {DAYS_MULT} days / '
           f'MAIN THREAD> New screen line = {reportPeriod} days.')
     print(f'MAIN THREAD> sleepAmount: {sleepAmount} seconds')
@@ -104,6 +112,7 @@ if __name__ == '__main__':
     elapsed = time_mt() - startTime
     print(f'MAIN THREAD> Termino sleep de main thread...///')
     print(f'\n~~~~~~~~~~~~~~~~~~~ Total number of threads running: {threading.active_count()} ~~~~~~~~~~~~~~~~~~~~~ ')
+
     for f in IntervalFunctions.getFuncs():          # Exit all background threads.
         f.killThread()
         print(f"+++++++++++ Thread: {f.thread.name} +++++++++++++ Thread Counter: {f.thread.threadCounter}")
@@ -115,9 +124,11 @@ if __name__ == '__main__':
     print(f'getFldName() Access Counter: {__fldNameCounter}')
     # sleep(1)
     # SqliteQueueDatabase.stop_all_writers()        # Funca lindo. Aqui da aviso de buffers activos y sale.
-    FrontEndHandler.main_loop_quit()
-    AsyncBuffer.flush_all()                     # Flushes all AsyncBuffer queues, processing all objects in them.
-    SqliteQueueDatabase.stop_all_writers()      # Processes all pending database cursor objects (mostly db writes).
+    # FrontEndHandler.main_loop_quit()
+    close_db_writes()
+
+    # AsyncBuffer.flush_all()                     # Flushes all AsyncBuffer queues, processing all objects in them.
+    # SqliteQueueDatabase.stop_all_writers()      # Processes all pending database cursor objects (mostly db writes).
     # writeObj.stop()
 
     print(f'MAIN THREAD> ULTIMA linea de codigo............adios.')

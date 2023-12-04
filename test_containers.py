@@ -20,8 +20,10 @@ if __name__ == '__main__':
                         abbrev='FEU', state_entity=True)
 
     # print(f'All Geo Objects: {Geo.getGeoEntities()}')
-    feudalia = next(e for e in Geo.getGeoEntities().values() if e.name.lower().__contains__('feudo'))
-    print(f'my Feudo name is: {feudalia.name}')
-    feudalia.removeGeoEntity()
+    feudalia = next((e for e in Geo.getGeoEntities().values() if 'feudo' in e.name.lower()), 'Entity not found')
+    print_str = f'my Feudo name is: ' + (f'{feudalia.name}' if isinstance(feudalia, Geo) else feudalia)
+    print(print_str)
+    if isinstance(feudalia, Geo):
+        feudalia.removeGeoEntity()
 
 

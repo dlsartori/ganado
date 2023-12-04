@@ -17,7 +17,7 @@ from decimal import Decimal
 import functools
 from threading import Lock
 from concurrent.futures import ThreadPoolExecutor
-from krnl_db_access import _upload_exempted, SqliteQueueDatabase, writeObj, DBAccessError
+from krnl_db_access import _upload_exempted, SqliteQueueDatabase, writeObj, DBAccessError, init_database
 from krnl_async_buffer import BufferAsyncCursor, AsyncBuffer
 
 ACTIVITY_LOWER_LIMIT = 15
@@ -1349,11 +1349,6 @@ def setRecord(tblName: str, *, mode=None, **kwargs):
     if not wrtDict or not db_fldID:
         return None
 
-    # # Seteo especifico de NULL: cuando se necesita setear un campo a NULL, que que arriba se saltan los None.
-    # for k in wrtDict:
-    #     if wrtDict[k] == NULL:          # TODO(cmt): this test of NULL is too expensive. Will not be implemented.
-    #         wrtDict[k] = None
-
     fldID_orig = wrtDict.get(db_fldID, 0)   # TODO(cmt): valor pasado de fldID. INSERT=None; UPDATE: > 0
     if fldID_orig > 0:            # TODO(cmt): *************** UPDATE *****************
         db_operation = 'UPDATE'
@@ -1617,6 +1612,11 @@ def delRecord(tblName=None, idRecord=None, **kwargs):
     return retValue
 
 
+def close_db_writes():
+    AsyncBuffer.flush_all()
+    SqliteQueueDatabase.stop_all_writers()
+    return None
+
 
 # Las funciones de abajo no pueden salir de este modulo por ahora (circular import errors)
 
@@ -1744,4 +1744,7 @@ def fetchAnimalParameterValue(paramName: str, paramType='general'):
         if temp.dataLen and temp.dataList[0]:
             retValue = temp.getVal(0, 'fldParameterValue')
     return retValue
+
+
+init_database()         # Creates all Triggers and Indices in db file.
 

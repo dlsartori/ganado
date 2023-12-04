@@ -1,20 +1,20 @@
 from custom_types import *
-from collections import deque           # Used to create a circular queue of classes that implement processReplicated().
 from krnl_config import time_mt, DAYS_MULT, USE_DAYS_MULT, tables_and_binding_objects, tables_and_methods
-from krnl_abstract_method_factory import ActivityMethod
-# TODO(cmt): pydantic used in Bovine for now. See where this leads us to.
-import pydantic
-from pydantic import (BaseModel, field_validator, typing, ValidationError, constr, conint, conlist, PositiveInt,
-                      NegativeInt, PositiveFloat)
+
+# import pydantic           ### pydantic not used anymore for now (Nov-23)
+# from pydantic import (BaseModel, validator, typing, ValidationError, constr, conint, conlist, PositiveInt,
+#                       NegativeInt, PositiveFloat)
 
 def moduleName():
     return str(os.path.basename(__file__))
 
+# Initializes set used to cleanup __outerAttr dictionaries in Activity objects.
+if '_classes_with_Activity' not in globals():
+    globals()['_classes_with_Activity'] = set()
+
 class EntityObject(object):
     __slots__ = ('__ID', '__isValidFlag', '__isActiveFlag', '__supportsMemoryData', '_lastInventory',
                  '_lastStatus', '_lastLocalization', '_lastCategoryID', '__daysToTimeout', '__timeoutFlag')
-
-    # __replication_deque = deque()   # deque to be used as a circular queue of classes. Used in IntervalTimer funcs.
 
     # Runs _creatorActivityObjects() method to create Activity Objects and the @property methods to invoke their code.
     # Populates tables_and_methods, tables_and_binding_objects to use in IntervalTimer threads.
@@ -22,11 +22,15 @@ class EntityObject(object):
         super.__init_subclass__()
         if hasattr(cls, '_activityObjList'):  # Si tiene definidos _activityObjList, _myActivityClass ejecuta funcion.
             cls._creatorActivityObjects()     # Crea objectos Activity y sus @property names a ser usados en el codigo.
+            if cls._activityObjList:
+                # _classes_with_Activity used to clean __outerAttr dictionaries: removes entries for killed threads.
+                globals()['_classes_with_Activity'].add(cls)
+                # print(f'&&&&&&&& Classes with Activity: {globals()["_classes_with_Activity"]} - {moduleName()}-{lineNum()}')
 
         # Load ALL elements of the dictionary that have value == cls.
         for k, v in tables_and_binding_objects.items():     # k: Table_Name; v: class name ('Animal', 'Tag', etc.)
             if cls.__name__ == v:
-                # 1. Replaces Object_Name with object (ex: 'Animal' with <class Animal>) in tables_and_binding_objects.
+                # 1. Replaces Object_Name with object (ex.: 'Animal' with <class Animal>) in tables_and_binding_objects.
                 tables_and_binding_objects[k] = cls
                 # 2. Gets method/function from Method_Name via getattr()
                 if k in tables_and_methods:
@@ -36,8 +40,12 @@ class EntityObject(object):
             if cls.getClassesEnabled()[cls.getAnimalClassID()]:
                 cls.registerKindOfAnimal()
 
+        return None
+
+
+
     # TODO(cmt): The whole point of this method is to be called with the right _activityObjList, _myActivityClass
-    #   attributes based on cls, in order to define it in one place only (here!).
+    #   attributes based on cls, so that it is defined in one place only (here).
     @classmethod
     def _creatorActivityObjects(cls):
         """ Creates Animal Activity Objects (Instances of ActividadInventarioAnimal, ActividadLocalizacionAnimal, etc)
@@ -49,7 +57,7 @@ class EntityObject(object):
         if cls._activityObjList:
             return None  # this function must only run once.
 
-        cls._creator_run = True  # Never run code again.
+        cls._creator_run = True  # Never run this code again.
         missingList = []
         # Creates InventoryAnimalActivity, StatusAnimalActivity, MoneyActivity singleton objects. Puts them in a list.
         # __class_register is a list that holds all subclasses with a valid __method_name for _myActivityClass.
@@ -58,7 +66,7 @@ class EntityObject(object):
             # Processing GenericActivityAnimal first in the 'if' enables a Generic Activity being overriden.
             # 'GenericActivityDevice', 'GenericActivityPerson' --> Future development of generic activities.
             if c.__name__ in ('GenericActivityAnimal', 'GenericActivityDevice', 'GenericActivityPerson'):
-                genericActivityObjects = c._createActivityObjects()
+                genericActivityObjects = c._createGenericActivityObjects()
                 if genericActivityObjects:
                     cls._activityObjList.extend(genericActivityObjects)
             else:
@@ -88,7 +96,7 @@ class EntityObject(object):
         print(f'Activity Objects for {cls.__name__} are: {d}', dismiss_print=DISMISS_PRINT)
         return None
 
-        #                              ### Original code for loop, using ActivityMethod class ###
+        #                              ### Original code for the loop, using ActivityMethod class ###
         # Loops _activityObjList to create all callable properties (inventory, status, etc.) as attributes in cls.
         # for j in cls._activityObjList:  # List of Activty objects (InventoryAnimalActivity, StatusAnimalActivity, etc)
         #     if j._decoratorName:  # se salta los None. Solo crea metodos cuando __method_name esta definido en la clase.
@@ -107,10 +115,30 @@ class EntityObject(object):
     __defaultDaysToTO = 0   # int(tblSysParams.getVal(indexDefaultTO, 'fldParameterValue'))
     __defaultDaysToTO = __defaultDaysToTO if __defaultDaysToTO > 0 else 366
 
+    @staticmethod
+    def ActivityCleanup(thread_id):
+        """
+        Traverses all Activity objects listed in _activityObjList and removes the entry for thread_id in the __outerAttr
+        dictionary for all objects present.
+        Called by the code that kills thread_id thread.
+        This is to prevent the __outerAttr from growing out of control as threads are started and killed.
+        @param thread_id:
+        @return: None
+        """
+        if "_classes_with_Activity" in globals():
+            for cls in globals()["_classes_with_Activity"]:
+                if hasattr(cls, '_activityObjList') and cls._activityObjList:
+                    for o in cls._activityObjList:
+                        if o._pop_outerAttr_key(thread_id):
+                            print(f'...Removing thread_id {thread_id} for {cls.__name__}.{o._decoratorName}.'
+                                  f' - {moduleName()}-{lineNum()}.', dismiss_print=DISMISS_PRINT)
+        return None
+
+
     def __init__(self, ID_Obj, isValid, isActive, *args, **kwargs):
         if isinstance(ID_Obj, (int, str)):
             self.__ID = ID_Obj          # recordID es ID_Animal, ID_Caravana, ID_Persona, ID_Dispositivo, ID_Item
-            self.__isValidFlag = isValid                 # Activo / No Activo de tabla Data Status
+            self.__isValidFlag = isValid or True          # Activo / No Activo de tabla Data Status
             # !=None para Animales, None para el resto de los objetos.
             self.__isActiveFlag = isValid * isActive  # Active es True/False SOLO si __isValidFlag = True
             self.__supportsMemoryData = next((kwargs[j] for j in kwargs if j.lower().startswith('memdata')), None) or False

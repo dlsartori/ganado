@@ -3,7 +3,7 @@ import sqlite3
 from krnl_exceptions import DBAccessError
 from krnl_config import db_logger, krnl_logger, callerFunction,  singleton, MAIN_DB_NAME, strError, MAIN_DB_ID, \
     CLIENT_MIN_INDEX, CLIENT_MAX_INDEX, NEXT_BATCH_MIN_INDEX, NEXT_BATCH_MAX_INDEX, print, DISMISS_PRINT, connCreate, \
-    DATASTREAM_DB_NAME
+    DATASTREAM_DB_NAME, tables_and_binding_objects, tables_and_methods, DB_REPLICATE
 from random import randrange
 
 from krnl_sqlite import getFldName, getTblName, SQLiteQuery, set_reloadFields
@@ -26,7 +26,6 @@ except ImportError:
 SENTINEL = object()     # Vamos a ver como funciona esto...
 
 _upload_exempted = ['tbl_Upload_To_Server', ]  # list of database tables that must not be uploaded to server.
-
 
 def update_fldUPDATE(fldUPDATE_dict: dict, db_fld_name, fld_value):
     """ returns a python dictionary ready for JSON serialization. Callback for sqlite UPDATE Trigger.
@@ -801,7 +800,7 @@ def trigger_on_insert_delete(tblName: str, operation='insert'):
     #        f' END; '
 
 
-def setFldCompareIndex(val: int = None, *, field_list=()):      # Must function define here to be able to use writeObj.
+def setFldCompareIndex(val: int = None, *, field_list=()):      # Must define function here to be able to use writeObj.
     """
     Sets val (int) as the Compare_Index value in _sys_Fields table for the items listed in field_list.
     @param val:
@@ -830,6 +829,16 @@ def setFldCompareIndex(val: int = None, *, field_list=()):      # Must function 
     return False
 
 
+def init_database():
+    if DB_REPLICATE and 'DB_INITIALIZED' not in globals():
+        trigger_tables = init_db_replication_triggers()
+        print(f'krnl_db_access.py(836): INSERT/UPDATE Triggers created for: {trigger_tables}')
+        print(f'krnl_db_access.py(837): tables_and_binding_objs: {tables_and_binding_objects}\n'
+              f'tables_and_methods:{tables_and_methods}.')
+        globals()['DB_INITIALIZED'] = True
+    return None
+
+
 # Write Obj. para TODAS las escrituras en DB del sistema
 writeObj = SqliteQueueDatabase(MAIN_DB_NAME, autostart=True, sync_db_across_devices=False)
 # Todas las llamadas posteriores a SqliteQueueDatabase() para crear un objeto, retornara este mismo objeto (singleton)
@@ -837,6 +846,26 @@ writeObj = SqliteQueueDatabase(MAIN_DB_NAME, autostart=True, sync_db_across_devi
 # Se pueden crear eventualmente multiples writeObjects para multiples archivos DB (1 writeObject por cada archivo DB).
 
 writeObj_DS = SqliteQueueDatabase(DATASTREAM_DB_NAME, autostart=True, sync_db_across_devices=False)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

@@ -300,7 +300,7 @@ class AltaActivityAnimal(AnimalActivity):
                         fldComment=tblObjects.getVal(0, 'fldComment'),
                         fldTimeStamp=eventDate, fldDateExit=dateExit,
                         fldFK_UserID=userID,
-                        new_object=True  # signals not to read lastInventory, lastStatus, lastCategoryID from DB
+                        fresh_obj=True  # signals not to read lastInventory, lastStatus, lastCategoryID from DB
                         )
         if not isinstance(animalObj, cls):
             retValue = f'ERR_Sys_ObjectNotCreated: {animalObj} - {callerFunction()}'
@@ -436,21 +436,29 @@ class BajaActivityAnimal(AnimalActivity):
         self.tipoDeBajaDict = dict(zip(temp1.getCol('fldName'), temp1.getCol('fldID')))
 
     # TODO(cmt): Auto-call class: All instances of this class call this method whenever referenced in the code.
-    # def __call__(self, caller_object=None, *args, **kwargs):
-    #     self.outerObject = caller_object
-    #     return self.__perform(*args, **kwargs)
+    def __call__(self, caller_object=None):
+        self.outerObject = caller_object
 
-    def perform(self, *args, **kwargs):
-        return self.__perform(*args, **kwargs)
+        def inner(*args, **kwargs):
+            return self.__perform(*args, **kwargs)
+
+        return inner
 
 
-    def __perform(self, bajaType: str, *args: DataTable, **kwargs):    # Called via @property in Class Animal
+    def __perform(self, bajaType: str = None, *args: DataTable, **kwargs):    # Called via @property in Class Animal
         """
         @param self: Object for which perform is executed. Object to be removed.
         @param bajaType: Tipo de Baja (Venta, Muerte, Extravio, Consumo Interno, Dummy, Salida-Otra)
         @return: ID_Animal dado de perform (int) o errorCode (str)
         """
         outerObj = self.outerObject
+        if not bajaType:
+            bajaType = kwargs.get('type', None)
+        if not bajaType:
+            err_str = f"ERR_INP: Missing or invalid argument 'Tipo de Baja'. Baja for animal {outerObj} not performed."
+            krnl_logger.info(err_str)
+            return err_str
+
         tblObjectsName = 'tblAnimales'
         tblDataCategoriasName = 'tblDataAnimalesCategorias'
         tblDataStatusName = 'tblDataAnimalesActividadStatus'

@@ -16,17 +16,16 @@ class AnimalActivity(Activity):     # Abstract Class (no lleva ningun instance a
     __abstract_class = True     # Activity runs the __init_subclass() function to initialize all subclasses.
 
     # Accessed from Activity class. Stores AnimalActivity class objects.
-    _activity_class_register = set()    # Used to create instance objects for each AnimalActivity
+    _activity_class_register = set()    # Classes used to create instance objects for each AnimalActivity.
 
-    def __call__(self, caller_object=None, *args, **kwargs):
+    def __call__(self, caller_object=None):
         """            *** This method is inherited and can be accessed from derived classes. Cool!! ****
         __call__ is invoked when an instance is followed by parenthesis (instance_obj()) or when a property is defined
         on the instance, and the property is invoked (inventory.get(): in this case __call__ is invoked for the object
         associated with inventory property before making the get() call. Then, outerObject is properly initialized.)
         @param caller_object: instance of Bovine, etc. that invokes the Activity. How this binding works is shown at
         https://stackoverflow.com/questions/57125769/when-the-python-call-method-gets-extra-first-argument
-        @param args:
-        @param kwargs:
+
         @return: Activity object invoking __call__()
         """
         # item_obj=None above is important to allow to call fget() like that, without having to pass dummy parameters.
@@ -73,12 +72,16 @@ class AnimalActivity(Activity):     # Abstract Class (no lleva ningun instance a
     _activityExcludedFieldsClose = {}  # {activityID: (excluded_fields, ) }
     __activityExcludedFieldsCreate = {}  # {activityID: (excluded_fields, ) }
 
+    # Creates dictionary with GenericActivity data. Each item in the dictionary will generate 1 GenericActivity object.
     for j in range(temp.dataLen):
         d = temp.unpackItem(j)
         if d['fldTableAndFields'] and d['fldDecoratorName'] and "." in d['fldTableAndFields']:
             tbl_flds = d['fldTableAndFields'].split(".")
             _genericActivitiesDict[d['fldName']] = (d['fldID'], d['fldDecoratorName'], tbl_flds[0], tbl_flds[1],
                                                      d['fldFilterField'] or 'fldDate')
+    print(f'------------{moduleName()}.{lineNum()}-- _genericActivitiesDict: {_genericActivitiesDict}',
+          dismiss_print=DISMISS_PRINT)
+
 
     @classmethod                                    # TODO(cmt): Main two methods to access excluded_fields
     def getActivityExcludedFieldsClose(cls, activity_name=None):
@@ -88,7 +91,7 @@ class AnimalActivity(Activity):     # Abstract Class (no lleva ningun instance a
     def getActivityExcludedFieldsCreate(cls, activity_name=None):
         return cls.__activityExcludedFieldsCreate.get(activity_name, set())
 
-    # Como funciona: aqui se registran todos los objetos que se crean a partir de clases Activities especificas y
+    # Como funciona: aqui se registran todos los objetos que se crean a partir de class Activity especificas, como
     # @singleton. Entonces si se pasa un activity_name ya definido a GenericActivity() este retorna el objeto singleton
     # ya existente.
     __definedActivities = {}  # {'activity_name': activityObj}. Used to avoid duplication with GenericActivity objects.
@@ -132,6 +135,11 @@ class AnimalActivity(Activity):     # Abstract Class (no lleva ningun instance a
 
         super().__init__(isValid, activityName, activityID, invActivity, activity_enable, self.__tblRAName, *args,
                          tblDataName=tbl_data_name, tblObjectsName=self.__tblObjectsName,  **kwargs)     #
+
+        # # TODO(cmt): __outerAttr => ONLY 1 object per Activity and per Thread (recursion with a different object for
+        # #  SAME activity and SAME Thread is not supported). Used by all re-entrant methods (that could be called by
+        # #  different threads: Activity.__call__, _setInventory, _setStatus, _setLocaliz, _getRecordLinkTables, etc.).
+        # self.__outerAttr = {}  # Atributo DINAMICO. {threadID: outerObject, }
 
     @classmethod
     def getActivitiesDict(cls):
@@ -522,7 +530,7 @@ class GenericActivityAnimal(AnimalActivity):                # GenericActivity Cl
     """
     __method_name = 'generic_activity'  # Defines __method_name to be included in Activity._activity_class_register
     # methods not to be deleted / unregistered.
-    __reserved_names = ('get', 'set', 'register_method', 'unregister_method','methods_wrapper','_createActivityObjects')
+    __reserved_names = ('get', 'set', 'register_method', 'unregister_method','methods_wrapper','_createGenericActivityObjects')
     __initialized = False
 
     def __new__(cls, activName, *args, **kwargs):  # Override para crear objeto nuevo solo si Activity no esta definida
@@ -556,7 +564,7 @@ class GenericActivityAnimal(AnimalActivity):                # GenericActivity Cl
 
 
     @classmethod
-    def _createActivityObjects(cls, **kwargs):
+    def _createGenericActivityObjects(cls, **kwargs):
         """ Returns list of GenericActivityAnimal objects to be initialized in Animal.__init_subclass(). """
         retList = []
         for k in cls._genericActivitiesDict:
@@ -702,15 +710,6 @@ class GenericActivityAnimal(AnimalActivity):                # GenericActivity Cl
                 return None             # ignores reserved method names
             delattr(self, method_name)
         return None
-
-    # def register_method00(self, method_name: str = None, method_obj=None):
-    #     if not isinstance(method_name, str) or not callable(method_obj):
-    #         return None
-    #     setattr(self, method_name, method_obj)  # method_obj
-    #     # Adds Activity object instance to function dict, to access self from within function.
-    #     getattr(self, method_name).__dict__['__self__'] = self  # self is GenericActivity object instance.
-    #     return True
-
 
 @singleton
 class InventoryActivityAnimal(AnimalActivity):

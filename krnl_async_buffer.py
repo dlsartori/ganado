@@ -283,7 +283,7 @@ class AsyncBuffer(AbstractAsyncBaseClass):  # Class to manage memory asynchronou
 # ------------------------------------------------ End Class AsyncBuffer ------------------------------------- #
 
 
-class BufferWriter(object):         # BufferWriter instances created inside AsyncCursor class.
+class BufferWriter(object):         # BufferWriter instances are created inside AsyncCursor class.
     """ Implements a Queue where database records to be uploaded to server are placed.
         Implements a dedicated thread that runs a function in a continuous loop that scans the queue for objects of
         specific type and sends the object data for writing to db. The write is performed calling the object's own

@@ -425,7 +425,7 @@
   <customwidget>
    <class>ComboTabla</class>
    <extends>QComboBox</extends>
-   <header>comboTabla</header>
+   <header>ui.comboTabla</header>
   </customwidget>
  </customwidgets>
  <tabstops>

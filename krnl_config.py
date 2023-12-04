@@ -20,7 +20,7 @@ from json import JSONEncoder, JSONDecodeError
 from krnl_exceptions import DBAccessError
 import sqlite3
 from decimal import Decimal
-# from deepdiff import DeepDiff
+from deepdiff import DeepDiff
 # PRINT_MAX_LEN = 160
 # VERBOSE = 0             # Parametro para habilitar/deshabilitar avisos a pantalla de ciertas funciones
 
