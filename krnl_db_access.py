@@ -1,9 +1,9 @@
 # import weakref
 import sqlite3
 from krnl_exceptions import DBAccessError
-from krnl_config import db_logger, krnl_logger, callerFunction,  singleton, MAIN_DB_NAME, strError, MAIN_DB_ID, \
+from krnl_config import db_logger, krnl_logger, callerFunction,  singleton, MAIN_DB_NAME, strError, TERMINAL_ID, \
     CLIENT_MIN_INDEX, CLIENT_MAX_INDEX, NEXT_BATCH_MIN_INDEX, NEXT_BATCH_MAX_INDEX, print, DISMISS_PRINT, connCreate, \
-    DATASTREAM_DB_NAME, tables_and_binding_objects, tables_and_methods, DB_REPLICATE
+    DATASTREAM_DB_NAME, DB_REPLICATE
 from random import randrange
 
 from krnl_sqlite import getFldName, getTblName, SQLiteQuery, set_reloadFields
@@ -681,23 +681,106 @@ class GreenletHelper(ThreadHelper):
 # --------------------------------------------- END AsyncCursor --------------------------------------------------- #
 
 
+# ------------------------------------------ Trigger Functions ---------------------------------------------------- #
+
+def _create_db_trigger(trigger_str=None):
+    """ Creates trigger defined by trigger_str in database.
+       @return: None
+       """
+    qryObj = SQLiteQuery()
+    cur = qryObj.execute(trigger_str)
+    if not isinstance(cur, sqlite3.Cursor):
+        db_logger.error(f'ERR_DB: Database trigger {trigger_str} could not be created.')
+    return None
+
+def _drop_db_trigger(trigger_name=None):
+    """ Creates trigger defined by trigger_str in database.
+       @return: None
+       """
+    if trigger_name:
+        qryObj = SQLiteQuery()
+        cur = qryObj.execute(f'DROP IF EXISTS {trigger_name}; ')
+        if not isinstance(cur, sqlite3.Cursor):
+            db_logger.error(f'ERR_DB: Database trigger {trigger_name} could not be dropped.')
+    return None
+
+
+
+
+
+
+def _trigger_check_duplicates_all_ids(tblName: str = None, db=MAIN_DB_NAME):          # for Geo, Caravanas
+    dbTblName = getTblName(tblName)
+    if strError in str(dbTblName):
+        if strError in getTblName(db_table_name=tblName.strip()):
+            return False
+        dbTblName = tblName.strip()
+
+    return True
+
+def _trigger_check_duplicates_single_id(tblName: str = None, db=MAIN_DB_NAME):   # for Animales, Dispositivos, Personas
+    dbTblName = getTblName(tblName)
+    if strError in str(dbTblName):
+        if strError in getTblName(db_table_name=tblName.strip()):
+            return False
+        dbTblName = tblName.strip()
+    return True
+
+
+def _trigger_update_linked_cols(tblName: str = None, db=MAIN_DB_NAME, linked_table=''):
+    """
+    Updates column UID_Objeto on table linked_table when UID_Objecto is updated on table tblName.
+    @param tblName: table where the UID_Objeto is UPDATEd.
+    @param db:
+    @param linked_table:Table with col linked to tblName.UID_Objeto that must be modified to preserve same UID_Objeto.
+    @return: None.
+    """
+    dbTblName = getTblName(tblName)
+    if strError in str(dbTblName):
+        if strError in getTblName(db_table_name=tblName.strip()):
+            return False
+        dbTblName = tblName.strip()
+
+
+    return True
+
+
+def _trigger_delete_FK_row(tblName: str = None, db=MAIN_DB_NAME, linked_table=''):
+    """             # TODO: CHECK IF THIS NEEDS TO BE IMPLEMENTED.
+    DELETEs record with column UID_Objeto on table target_table when UID_Objecto is DELETEd from table tblName.
+    @param tblName:
+    @param db:
+     @param linked_table:Table with col linked to tblName.UID_Objeto that must be DELETEd to preserve consistency.
+    @return: None
+    """
+    dbTblName = getTblName(tblName)
+    if strError in str(dbTblName):
+        if strError in getTblName(db_table_name=tblName.strip()):
+            return False
+        dbTblName = tblName.strip()
+
+
+    return True
+
+
+#                                       TODO(cmt): all trigger function below are deprecated.
 def init_db_replication_triggers():
     """
-    Reads data from _sys_Fields table and sets INSERT and UPDATE Triggers for all rows with 'Method_Name' != None.
+    Reads data from _sys_Fields table and sets INSERT and UPDATE Triggers for all rows with 'Methods' != None.
     @return: None
     """
     con = connCreate()
-    sql = "SELECT ID_Table, Table_Name, Table_Key_Name, Method_Name FROM '_sys_Tables' WHERE Method_Name IS NOT NULL; "
+    sql = "SELECT ID_Table, Table_Name, Table_Key_Name, Trigger_INSERT FROM '_sys_Tables' WHERE Trigger_INSERT IS NOT NULL; "
     cur = con.execute(sql)
     tbl_list = cur.fetchall()
-    trigger_tables_dict = {}  # {dbTblName: Method_Name,} Method_Name: method to process table replication across nodes.
+    trigger_tables_dict = {}  # {dbTblName: Methods,} Methods: method to process table replication across nodes.
     if tbl_list:
         trigger_tables_dict = {tbl_list[i][1]: tbl_list[i][3] for i in range(len(tbl_list)) if
                                isinstance(tbl_list[i][3], str)}
     if trigger_tables_dict:
         for k in trigger_tables_dict:
             flds_dict = getFldName(db_table_name=k)     # Gets FULL field structure as dict {fldName: dbFldName, }
-            for f in ('fldUPDATE', 'fldDB_ID', 'fldPushUpload', 'fldBitmask', 'fldTimeStampSync'):
+            for f in ('fldUPDATE', 'fldTerminal_ID', 'fldPushUpload', 'fldBitmask', 'fldTimeStampSync'):
                 if f in flds_dict:
                     flds_dict.pop(f, None)
             update_fields_list = list(flds_dict.values())
@@ -712,8 +795,10 @@ def init_db_replication_triggers():
     return retValue
 
 
-def trigger_on_update(tblName: str, col_list=None):
-    """ Trigger on UPDATE: for fields selected in col_list increments value of field Record UPDATE on every UPDATE. """
+def trigger_on_update(tblName: str, col_list=None):     # TODO: "AFTER UPDATE" TRIGGERS ARE NOW DEPRCATED. 16-DEC-23
+    """ Trigger on UPDATE: for fields selected in col_list increments value of field Record UPDATE on every UPDATE.
+    The system depends on every table having unique "Record UPDATE" values, in every terminal, so a random value is
+    generated when Record UPDATE first initializes """
     dbTblName = getTblName(tblName)
     if strError in str(dbTblName):
         if strError in getTblName(db_table_name=tblName.strip()):
@@ -740,7 +825,7 @@ def trigger_on_update(tblName: str, col_list=None):
            (f' UPDATE "{dbTblName}" SET "Record UPDATE" = IFNULL(old."Record UPDATE",' 
             f' {randrange(1000, 5000) * randrange(100, 1000)}) + 1 WHERE ROWID=new.ROWID;'
             if "Record UPDATE" in fldNames.values() else '') + \
-           (f' UPDATE _sys_Trigger_Tables SET TimeStamp=DATETIME("now","localtime"), Last_Updated_By="{MAIN_DB_ID}"'
+           (f' UPDATE _sys_Trigger_Tables SET TimeStamp=DATETIME("now","localtime"), Last_Updated_By="{TERMINAL_ID}"'
             f' WHERE DB_Table_Name="{dbTblName}";'
             if dbTblName in tbl_list else '') + \
            f' END; '
@@ -782,22 +867,23 @@ def trigger_on_insert_delete(tblName: str, operation='insert'):
     operation = 'INSERT' if 'ins' in operation else 'DELETE'
     if operation != "INSERT" and dbTblName not in tbl_list:
         return None
-    return f'CREATE TRIGGER IF NOT EXISTS "Trigger_{dbTblName}_{operation}" AFTER {operation} ON "{dbTblName}"' \
+
+    # 1. UPDATE dbTblName.Terminal_ID = Terminal_ID to indicate which Terminal made the change to the record.
+    # 2. UPDATE _sys_Trigger_Tables.Last_Updated_By != TERMINAL_ID -> Should only run when a duplicate value is found.
+    # TODO(cmt): This Trigger WILL OVERWRITE Terminal_ID in ALL incoming records with the local Terminal_ID. WON'T DO!!
+    val =  f'CREATE TRIGGER IF NOT EXISTS "Trigger_{dbTblName}_{operation}" AFTER {operation} ON "{dbTblName}"' \
            f' FOR EACH ROW BEGIN' + \
-           (f' UPDATE "{dbTblName}" SET DB_ID=(SELECT DB_ID FROM _sys_db_id LIMIT 1) WHERE ROWID=new.ROWID; '
+           (f' UPDATE "{dbTblName}" SET Terminal_ID=(SELECT Terminal_ID FROM _sys_terminal_id LIMIT 1) WHERE ROWID=new.ROWID; '
             if operation == 'INSERT' else '') + \
-           (f' UPDATE _sys_Trigger_Tables SET TimeStamp=DATETIME("now","localtime"), Last_Updated_By="{MAIN_DB_ID}"'
-            f' WHERE DB_Table_Name="{dbTblName}" AND new.DB_ID != "{MAIN_DB_ID}";'
+           (f' UPDATE _sys_Trigger_Tables SET TimeStamp=DATETIME("now","localtime"), Last_Updated_By="{TERMINAL_ID}"'
+            f' WHERE DB_Table_Name="{dbTblName}" AND new.Terminal_ID != "{TERMINAL_ID}";'
              if dbTblName in tbl_list else '') + \
             f' END; '
 
-    # return f'CREATE TRIGGER IF NOT EXISTS "Trigger_{dbTblName}_{operation}" AFTER {operation} ON "{dbTblName}"' \
-    #        f' FOR EACH ROW BEGIN' + \
-    #        (f' UPDATE "{dbTblName}" SET DB_ID=(SELECT DB_ID FROM _sys_db_id LIMIT 1) WHERE ROWID=new.ROWID; '
-    #         if operation == 'INSERT' else '') + \
-    #        (f' UPDATE _sys_Trigger_Tables SET TimeStamp=DATETIME("now","localtime") WHERE DB_Table_Name="{dbTblName}";' \
-    #             if dbTblName in tbl_list else '') + \
-    #        f' END; '
+    print(f'Trigger INSERT: {val}')
+    return val
+
+# --------------------------------------------- End Trigger functions --------------------------------------------- #
 
 
 def setFldCompareIndex(val: int = None, *, field_list=()):      # Must define function here to be able to use writeObj.
@@ -831,10 +917,10 @@ def setFldCompareIndex(val: int = None, *, field_list=()):      # Must define fu
 
 def init_database():
     if DB_REPLICATE and 'DB_INITIALIZED' not in globals():
-        trigger_tables = init_db_replication_triggers()
-        print(f'krnl_db_access.py(836): INSERT/UPDATE Triggers created for: {trigger_tables}')
-        print(f'krnl_db_access.py(837): tables_and_binding_objs: {tables_and_binding_objects}\n'
-              f'tables_and_methods:{tables_and_methods}.')
+        # trigger_tables = init_db_replication_triggers()
+        # print(f'krnl_db_access.py(836): INSERT/UPDATE Triggers created for: {trigger_tables}')
+        # print(f'krnl_db_access.py(837): tables_and_binding_objs: {tables_and_binding_objects}\n'
+        #       f'tables_and_methods:{tables_and_methods}.')
         globals()['DB_INITIALIZED'] = True
     return None
 

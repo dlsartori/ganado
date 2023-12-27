@@ -2,7 +2,7 @@
 import os
 from krnl_config import activityEnableFull, lineNum, singleton, time_mt, sessionActiveUser, callerFunction, \
     datetime_from_kwargs, fDateTime
-from custom_types import setupArgs, DataTable, getRecords, setRecord, delRecord
+from krnl_custom_types import setupArgs, DataTable, getRecords, setRecord, delRecord
 from krnl_animal_activity import AnimalActivity
 # from krnl_animal import Animal
 # from krnl_person import Person

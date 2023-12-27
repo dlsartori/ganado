@@ -1,14 +1,13 @@
 # from krnl_config import *
 import sqlite3
-
 from krnl_config import timerWrapper, bkgd_logger, connCreate, time_mt, print, DISMISS_PRINT, callerFunction, lineNum, \
-    USE_DAYS_MULT, MAIN_DB_NAME, os, VOID, SPD, DAYS_MULT, krnl_logger, fe_logger, ShutdownException, MAIN_DB_ID, \
-    tables_and_methods, tables_and_binding_objects, db_time_stamps
+    USE_DAYS_MULT, MAIN_DB_NAME, os, VOID, SPD, DAYS_MULT, krnl_logger, fe_logger, ShutdownException, TERMINAL_ID
 from datetime import datetime, timedelta
 import threading
 from krnl_db_access import SqliteQueueDatabase
 from krnl_entityObject import EntityObject      # Uses ActivityCleanup() to cleanup outerAttr dict. on exiting threads.
 from krnl_abstract_base_classes import AbstractFactoryBaseClass
+from krnl_custom_types import DataTable, dbRead, DBTrigger
 from time import sleep
 # import functools
 # import dis                            # Modulo pseudo-desensamblador de codigo
@@ -17,10 +16,13 @@ from krnl_async_buffer import AsyncBuffer, BufferAsyncCursor
 from krnl_abstract_class_animal import Animal
 from krnl_sqlite import SQLiteQuery
 
+
 RUNNING = object()
 NOT_RUNNING = 0
-REENTRY = -10           # Permite hasta 10 niveles de anidamiento. Interesting solution...
+REENTRY = -10           # 10 nesting levels. Interesting solution for Interval funcs designed with re-entrant code
 MIN_INTERVAL = 1        # Min interval in seconds for IntervalTimer threads
+TEST_MULTIPLIER = 1    # Seconds multiplier for execution of Interval functions. Default = 1.
+
 
 def moduleName():
     return str(os.path.basename(__file__))
@@ -453,7 +455,7 @@ class IntervalFunctions(object):
                 'thread': self.thread, 'thread is running': self.thread.is_alive()}
 # ========================================== End IntervalFunctions ================================================ #
 
-
+# TODO: ALL THIS SHOULD BE DEPRECATED NOW MEMORY DATA IS NO LONGER USED (14-Dec-23)
 class DatabaseReplicationCursor(BufferAsyncCursor):
     """ Implements the execution of methods that update memory data structures (last_inventory, last_category, etc.)
     resulting from database replication updating the data replicated in the local db tables to the memory data
@@ -484,13 +486,19 @@ class DatabaseReplicationCursor(BufferAsyncCursor):
         return cls(*args, event=event, the_object=the_object, the_callable=the_callable, **kwargs)   # returns cursor.
 
     def execute(self):
-        if callable(self._callable):        # self._callable is processReplicated() (for now...)
+        if callable(self._callable):        # self._callable is _processDuplicates and _processReplicated (for now...)
             # print(f'lalalalalalala execute {self.__class__.__qualname__}({lineNum()}): \n{self._callable}, '
             #       f'object: {self._object}, args: {self._args}')
             if hasattr(self._callable, "__self__"):
                 return self._callable(*self._args, **self._kwargs)  # self._callable comes already bound to self._object
             if self._object:
                 return self._callable(self._object, *self._args, **self._kwargs)  # self._callable NOT bound to _object.
+
+        elif hasattr(self._callable, '__func__'):   # sometimes objects passed are not callable, but have a __func__
+            if hasattr(self._callable.__func__, "__self__"):
+                return self._callable.__func__(*self._args, **self._kwargs)
+            if self._object:
+                return self._callable.__func__(self._object, *self._args, **self._kwargs)  # __func__ NOT bound to _object.
 
 
     def reset(self):
@@ -552,10 +560,10 @@ def hourlyTasks1(obj, *args, **kwargs):   # obj es tipo IntervalTimer, para acce
         print(f"Day # {obj.counter * REPORT_PERIOD}:", end='')
         if cls.timeoutEvent().is_set():
             cls.timeoutEvent().clear()
-            dicto1 = {j[0]: (f'age:{int(j[0].age.get() * (SPD*DAYS_MULT if USE_DAYS_MULT else 1))}', j[1], j[2])
+            dicto1 = {j[0]: (str(j[0].ID), j[1], j[2])
                       for j in cls.getBkgdAnimalTimeouts()}
-            # if dicto1:
-            print(f'TimeOutAnimals: {dicto1}')
+            if dicto1:
+                print(f'TimeOutAnimals: {dicto1}')
         else:
             print('', end='')
         # if cls.categoryEvent().is_set():
@@ -578,67 +586,128 @@ def minuteTasks1(obj, *args, **kwargs):
     # print(f'$$$$ MINUTES $$$$ - RUN #:{obj.counter}... Done.')
     return
 
-@timerWrapper(iterations=10)             # Temporizar pa' ver como anda...
-def checkTriggerTables(*args, **kwargs):
-    """ Checks whether TimeStamp has changed for the rows in [_sys_Trigger_Tables]. For any changes, enqueues a cursor
-    in replicateBuffer with all the information needed to perform checks and updates of the memory data structures
-    associated to each of the tables.
+# @timerWrapper(iterations=10)
+# def checkTriggerTables(*args, **kwargs):        # TODO: THIS IS DEPRECATED. NO LONGER USED.
+#     """ Checks whether TimeStamp has changed for the rows in [_sys_Trigger_Tables]. For any changes, enqueues a cursor
+#     in replicateBuffer with all the information needed to perform checks and updates of the memory data structures
+#     associated to each of the tables.
+#     """
+#     try:
+#         con = connCreate(MAIN_DB_NAME)
+#     except (sqlite3.Error, sqlite3.DatabaseError):
+#         return None
+#     else:
+#         if not isinstance(con, sqlite3.Connection):
+#             return None
+#     cur = con.execute("SELECT DB_Table_Name, TimeStamp, Last_Updated_By FROM _sys_Trigger_Tables; ")
+#     with con:
+#         if not isinstance(cur, sqlite3.Cursor):
+#             return None
+#         cur_data = cur.fetchall()
+#     con.close()      # NEED to close() here. Exiting with con: will call commit(), but NOT con.close()
+#     if cur_data:
+#         tbl_tstamps = {cur_data[i][0]: cur_data[i][1] for i in range(len(cur_data))}  # {Table_Name: TimeStamp, }
+#         last_updated_by = {cur_data[i][0]: cur_data[i][2] for i in range(len(cur_data))}  # {Table_Name:Last_Updated_,}
+#     else:
+#         tbl_tstamps = {}
+#         last_updated_by = {}
+#     if not tbl_tstamps:
+#         return None
+#
+#     for k in tbl_tstamps:                          # k is DB_Table_Name
+#         if tbl_tstamps[k] != checkTriggerTables.tstamps_last_values[k]:  # and last_updated_by[k] != TERMINAL_ID:
+#             if k in tables_and_methods:
+#                 the_method = tables_and_methods[k]
+#                 checkTriggerTables.tstamps_last_values[k] = tbl_tstamps[k]  # updates TimeStamp in last_values dict.
+#                 if callable(the_method):
+#                     the_object = tables_and_binding_objects.get(k, None)
+#                     if the_object:
+#                         print(f' hhhhhhheeeeeeeeeey Trigger Tables: AQUI ESTOY con {k}: ({tbl_tstamps[k]}, '
+#                               f'{last_updated_by[k]}) / '
+#                               f'{the_object.__name__}.{the_method} - self?: {the_method.__self__}!!! -- '
+#                               f'{moduleName()}-{lineNum()}')
+#                         replicateBuffer.enqueue(the_object=the_object, the_callable=the_method)
+#                     else:
+#                         replicateBuffer.enqueue(the_callable=the_method)
+#                 else:
+#                     return None
+#     return True
+# checkTriggerTables.tstamps_last_values = db_time_stamps     # {Table_Name: TimeStamp,}
+
+
+
+@timerWrapper(iterations=5)             # Temporizar pa' ver como anda...
+def processReplication(*args, **kwargs):
+    """    ****** This function gets all method names from classes_with_replication dict and enqueues the method for
+    REPLICATION processing. Then, the method (specific to each class that uses duplication) will check conditions and \
+    execute code accordingly. This is to make the interface general  *********
+    Pulls record belonging to this Terminal from [_sys_Terminals] table and for changes detected enqueues a cursor
+    in replicateBuffer with all the information needed run the _processDuplicates() function for all required classes.
+    @return: None
     """
-    try:
-        con = connCreate(MAIN_DB_NAME)
-    except (sqlite3.Error, sqlite3.DatabaseError):
-        return None
-    else:
-        if not isinstance(con, sqlite3.Connection):
-            return None
-    cur = con.execute("SELECT DB_Table_Name, TimeStamp, Last_Updated_By FROM _sys_Trigger_Tables; ")
-    with con:
-        if not isinstance(cur, sqlite3.Cursor):
-            return None
-        cur_data = cur.fetchall()
-    con.close()      # NEED to close() here. Exiting with con: will call commit(), but NOT con.close()
-    if cur_data:
-        tbl_tstamps = {cur_data[i][0]: cur_data[i][1] for i in range(len(cur_data))}  # {Table_Name: TimeStamp, }
-        last_updated_by = {cur_data[i][0]: cur_data[i][2] for i in range(len(cur_data))}  # {Table_Name:Last_Updated_,}
-    else:
-        tbl_tstamps = {}
-        last_updated_by = {}
-    if not tbl_tstamps:
-        return None
+    # TODO(cmt): For now, enqueues ALL the items found in the classes_with_replication dict. Includes both replication
+    #  and duplication functions.
+    for trig in [t for t in DBTrigger.get_trigger_register() if t.created_in_db and 'repl' in t.type]:
+        temp = dbRead('tbl_sys_Trigger_Tables', f'SELECT * FROM _sys_Trigger_Tables WHERE '
+                                                f'Trigger_Name == "{trig.name}"; ')
+        if isinstance(temp, DataTable) and temp:
+            if (temp.getVal(0, 'fldTimeStamp') or time_mt('dt')) > temp.getVal(0, 'fldLast_Processing'):
+                pass        # Goes to enqueue only if new records have been replicated onto the node.
+            else:
+                # print(f'heeeeeeeeeeeeeey ProcessReplication(): SKIPPING BECAUSE OF NO NEW DATA ******************\n'
+                #       f'sys_Trigger_Tables record: {temp.unpackItem(0)} ')
+                continue     # No new data, skips this processing function.
+        the_object = trig.calling_object  # cls required to bind to the method to complete the call.
+        the_method = trig.processing_method  # callable to process trigger actions.
+        if the_method:
+            # TODO: ALWAYS pass the_object to the buffer, as the_method is unbound.
+            # TODO: VERY IMPORTANT: The enqueued method MUST update fldLast_Processing in the affected row of _sys_Trigger_Tables.
+            replicateBuffer.enqueue(the_object=the_object, the_callable=the_method)
+        # print(f'heeeeeeeeeeeeeey ProcessReplication(): AQUI ESTOY. class: {the_object.__name__}: {the_method.__name__}, '
+        #       f'{moduleName()}-{lineNum()}')
 
-    for k in tbl_tstamps:                          # k is DB_Table_Name
-        if tbl_tstamps[k] != checkTriggerTables.tstamps_last_values[k]:  # and last_updated_by[k] != MAIN_DB_ID:
-            if k in tables_and_methods:
-                the_method = tables_and_methods[k]
-                checkTriggerTables.tstamps_last_values[k] = tbl_tstamps[k]  # updates TimeStamp in last_values dict.
-                if callable(the_method):
-                    the_object = tables_and_binding_objects.get(k, None)
-                    if the_object:
-                        print(f' hhhhhhheeeeeeeeeey Trigger Tables: AQUI ESTOY con {k}: ({tbl_tstamps[k]}, '
-                              f'{last_updated_by[k]}) / '
-                              f'{the_object.__name__}.{the_method} - self?: {the_method.__self__}!!! -- '
-                              f'{moduleName()}-{lineNum()}')
-                        replicateBuffer.enqueue(the_object=the_object, the_callable=the_method)
-                    else:
-                        replicateBuffer.enqueue(the_callable=the_method)
-                else:
-                    return None
-    return True
-
-checkTriggerTables.tstamps_last_values = db_time_stamps     # {Table_Name: TimeStamp,}
+    return None
 
 
-dailyFunctions = IntervalFunctions(interval=1.5 if USE_DAYS_MULT else 24*3600,  # TODO: Setear start_hour=1,
+@timerWrapper(iterations=5)             # Temporizar pa' ver como anda...
+def processDuplication(*args, **kwargs):
+    """    ****** This function gets all method names from classes_with_replication dict and enqueues the method for
+    DUPLICATION processing. Then, the method (specific to each class that uses duplication) will check conditions and
+    execute code accordingly. This is to make the interface general  *********
+    Separated from Replication cause it's expected to run way less often than the replication routines.
+    @return: None
+    """
+    # TODO(cmt): Uses TimeStamp vs Last_Processing in table _sys_Trigger_Tables to check for changes and enqueue
+    #  ONLY those items that have changes to process.
+    for trig in [t for t in DBTrigger.get_trigger_register() if t.created_in_db and 'dupl' in t.type]:
+        temp = dbRead('tbl_sys_Trigger_Tables', f'SELECT * FROM _sys_Trigger_Tables WHERE '
+                                                f'Trigger_Name == "{trig.name}"; ')
+        if isinstance(temp, DataTable) and temp:
+            if (temp.getVal(0, 'fldTimeStamp') or time_mt('dt')) > temp.getVal(0, 'fldLast_Processing'):
+                pass        # Goes to enqueue only if new records have been duplicated onto the node.
+            else:
+                continue  # No new data, skips this processing function.
+        the_object = trig.calling_object  # cls required to bind to the method to complete the call.
+        the_method = trig.processing_method  # callable to process trigger actions.
+        if the_method:
+            # TODO: ALWAYS pass the_object to the buffer, as the_method is unbound.
+            # TODO: VERY IMPORTANT: The enqueued method MUST update fldLast_Processing in the affected row of _sys_Trigger_Tables.
+            replicateBuffer.enqueue(the_object=the_object, the_callable=the_method)
+        # print(f'heeeeeeeeeeeeeey ProcessDUPLICATION(): AQUI ESTOY. class: {the_object.__name__}: {the_method.__name__},'
+        #          f' {moduleName()}-{lineNum()}.')
+    return None
+
+dailyFunctions = IntervalFunctions(interval=1.5*TEST_MULTIPLIER if USE_DAYS_MULT else 24*3600,  # TODO: Setear start_hour=1,
                                                     func_list=(animalUpdates,), start_hour=0, start_thread=False)
 
-fourADayFunctions = IntervalFunctions(interval=1 if USE_DAYS_MULT else 6*3600,  # TODO: Setear start_hour=2,
+fourADayFunctions = IntervalFunctions(interval=1*TEST_MULTIPLIER if USE_DAYS_MULT else 6*3600,  # TODO: Setear start_hour=2,
                                                          func_list=(FourADay,), start_thread=False)
 
 hourlyFunctions = IntervalFunctions(interval=REPORT_PERIOD/DAYS_MULT if USE_DAYS_MULT else 3600,
                                                      func_list=(hourlyTasks1, hourlyTasks2), start_thread=False)
 
-minuteFunctions = IntervalFunctions(interval=0.5 if USE_DAYS_MULT else 60,
-                                                     func_list=(minuteTasks1, checkTriggerTables), start_thread=False)
+minuteFunctions = IntervalFunctions(interval=0.5*TEST_MULTIPLIER if USE_DAYS_MULT else 60,
+                                    func_list=(minuteTasks1, processDuplication, processReplication), start_thread=False)
 
 # minuteFunctions = IntervalFunctions(interval=0.1243 if USE_DAYS_MULT else 60, func_list=(minuteTasks1, ),
 #                                     start_thread=False)  # interval=60

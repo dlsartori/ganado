@@ -141,7 +141,7 @@ class InventoryActivityTag(TagActivity):
                 No checks performed. The function doing the write will discard and ignore all non valid arguments
         @return: 0->ID_Actividad (Registro De Actividades) if success; errorCode (str) on error; None for nonValid
         """
-        retValue = self._setInventory(*args, **kwargs)
+        retValue, event_date = self._setInventory(*args, **kwargs)
         return retValue
 
 

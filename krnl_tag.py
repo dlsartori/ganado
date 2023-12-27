@@ -2,7 +2,7 @@ from krnl_entityObject import *
 from krnl_assetItem import AssetItem
 from krnl_tag_activity import *
 from krnl_config import callerFunction, sessionActiveUser, activityEnableFull
-from custom_types import setupArgs, getRecords, setRecord, delRecord
+from krnl_custom_types import setupArgs, getRecords, setRecord, DBTrigger
 from krnl_abstract_class_prog_activity import ProgActivity
 from uuid import UUID, uuid4
 from random import randrange
@@ -19,10 +19,11 @@ class Tag(AssetItem):
     _activityObjList = []  # List of Activity objects created by factory function.
     _myActivityClass = TagActivity
     __tblObjectsName = 'tblCaravanas'
+    __tagIdentifierChar = '-'  # Used to generate identifier = tagName + '-' + ID_TagTechnology in SQLITE Caravanas tbl.
 
     # Variables para logica de manejo de objetos repetidos/duplicados.
     _fldID_list = []  # List of all active records pulled by getRecords() from tblAnimales.
-    _fldID_exit_list = []  # List of all all records with fldExitDate > 0, updated in each call to processReplicated().
+    _fldID_exit_list = []  # List of all all records with fldExitDate > 0, updated in each call to _processDuplicates().
     _object_fldUPDATE_dict = {}  # {fldID: fldUPDATE_counter, }        Keeps a dict of uuid values of fldUPDATE fields
     _RA_fldUPDATE_dict = {}  # {fldID: fldUPDATE_counter, }      # TODO: ver si este hace falta.
     _RAP_fldUPDATE_dict = {}  # {fldID: fldUPDATE_counter, }      # TODO: ver si este hace falta.
@@ -32,11 +33,13 @@ class Tag(AssetItem):
         _fldID_list = tempList[0]  # Initializes _fldID_list with all fldIDs from active Animals.
         _object_fldUPDATE_dict = dict(zip(tempList[0], tempList[1]))
         _object_fldUPDATE_dict = {k: v for (k, v) in _object_fldUPDATE_dict.items() if v is not None}
+
         temp1 = getRecords(__tblObjectsName, '', '', None, 'fldID')
         if isinstance(temp1, DataTable) and temp1.dataLen:
             temp1_set = set(temp1.getCol('fldID'))
             _fldID_exit_list = list(temp1_set.difference(_fldID_list))
-
+        del temp1
+    del temp0
 
     # Listas de Tag.Activities, Inventory Activities.
     temp = getRecords('tblCaravanasActividadesNombres', '', '', None, 'fldID', 'fldName', 'fldFlag')
@@ -50,11 +53,154 @@ class Tag(AssetItem):
     __activitiesDict = dict(zip(__activityName, __activityID))  # tagActivities = {fldNombreActividad: fldID_Actividad}.
     __activitiesForMyClass = __activitiesDict
     __activeProgActivities = []             # List of all active programmed activities for Tag objects. MUST be a list.
+    del temp
 
     __tblDataInventoryName = 'tblDataCaravanasInventario'
     __tblDataStatusName = 'tblDataCaravanasStatus'
     __tblObjectsName = 'tblCaravanas'
+    __tblObjDBName = getTblName(__tblObjectsName)
     _myActivityClass = TagActivity
+
+    _active_uids_dict = {}  # {fldObjectUID: fld_Duplication_Index}
+    _active_duplication_index_dict = {}  # {fld_Duplication_Index: set(fldObjectUID, dupl_uid1, dupl_uid2, ), }
+
+    @classmethod
+    def tblObjDBName(cls):
+        return cls.__tblObjDBName
+
+
+    # reserved name, so that it's not inherited by lower classes, resulting in multiple executions of the trigger.
+    @staticmethod
+    def __generate_trigger_duplication(tblName):
+        temp = DataTable(tblName)
+        tblObjDBName = temp.dbTblName
+        Dupl_Index_val = f'(SELECT DISTINCT _Duplication_Index FROM "{tblObjDBName}" WHERE Identificadores_str ' \
+                         f'== NEW. Identificadores_str AND "FechaHora Registro" == (SELECT MIN("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM {tblObjDBName} ' \
+                                     f'WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL))) AND ' \
+                         f'("Salida YN" == 0 OR "Salida YN" IS NULL)), '
+
+        flds_keys = f'_Duplication_Index'
+        flds_values = f'{Dupl_Index_val}'
+        if isinstance(temp, DataTable) and temp.fldNames:
+            flds = temp.fldNames
+            excluded_fields = ['fldID', 'fldObjectUID', 'fldTimeStamp', 'fldTerminal_ID', 'fld_Duplication_Index']
+
+            # TODO: Must excluded all GENERATED COLUMNS to avoid attempts to update them, which will fail. fldID must
+            #  always be removed as its value is previously defined by the INSERT operation that fired the Trigger.
+            tbl_info = exec_sql(sql=f'PRAGMA TABLE_XINFO("{tblObjDBName}");')
+            if len(tbl_info) > 1:
+                idx_colname = tbl_info[0].index('name')
+                idx_hidden = tbl_info[0].index('hidden')
+                tbl_data = tbl_info[1]
+                restricted_cols = [tbl_data[j][idx_colname] for j in range(len(tbl_data)) if tbl_data[j][idx_hidden]>0]
+                if restricted_cols:    # restricted_cols: Hidden and Generated cols do not support UPDATE operations.
+                    restricted_fldnames = [k for k, v in temp.fldMap().items() if v in restricted_cols]
+                    excluded_fields.extend(restricted_fldnames)
+                excluded_fields = tuple(excluded_fields)
+
+            for f in excluded_fields:
+                if f in flds:
+                    flds.remove(f)
+            fldDBNames = [v for k, v in temp.fldMap().items() if k in flds]   # [getFldName(cls.tblObjName(), f) for f in flds]
+            flds_keys += f', {str(fldDBNames)[1:-1]}'        # [1:-1] removes starting and final "[]" from string.
+
+            for f in fldDBNames:
+                flds_values += f'NEW."{f}"' + (', ' if f != fldDBNames[-1] else '')
+        db_trigger_duplication_str = f'CREATE TRIGGER IF NOT EXISTS "Trigger_{tblObjDBName}_INSERT" AFTER INSERT ON "{tblObjDBName}" ' \
+                                     f'FOR EACH ROW BEGIN ' \
+                                     f'UPDATE "{tblObjDBName}" SET Terminal_ID = (SELECT Terminal_ID FROM _sys_terminal_id LIMIT 1), _Duplication_Index = NEW.UID_Objeto ' \
+                                     f'WHERE "{tblObjDBName}".ROWID == NEW.ROWID AND _Duplication_Index IS NULL; ' \
+                                     f'UPDATE "{tblObjDBName}" SET ({flds_keys}) = ({flds_values}) ' \
+                                     f'WHERE "{tblObjDBName}".ROWID IN (SELECT "{temp.getDBFldName("fldID")}" FROM (SELECT DISTINCT "{temp.getDBFldName("fldID")}", "FechaHora Registro" FROM "{tblObjDBName}" ' \
+                                     f'WHERE Identificadores_str == NEW.Identificadores_str ' \
+                                     f'AND ("Salida YN" == 0 OR "Salida YN" IS NULL) ' \
+                                     f'AND "FechaHora Registro" >= (SELECT MIN("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM "{tblObjDBName}" ' \
+                                     f'WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL))))); ' \
+                                     f'UPDATE _sys_Trigger_Tables SET TimeStamp = NEW."FechaHora Registro" ' \
+                                     f'WHERE DB_Table_Name == "{tblObjDBName}" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID AND NEW.Terminal_ID IS NOT NULL; ' \
+                                     f'END; '
+
+        print(f'Mi triggercito "{tblObjDBName}" es:\n {db_trigger_duplication_str}')
+        return db_trigger_duplication_str
+
+    @classmethod
+    def _init_uid_dicts(cls):
+        """
+        Initializes uid dicts upon system start up and when the dict_update flag is set for the class by SQLite.
+        Method is run in the __init_subclass__() routine in EntityObject class.
+        @return: None
+        """
+        sql = f'SELECT * from "{cls.tblObjDBName()}" WHERE ("{getFldName(cls.tblObjName(), "fldDateExit")}" IS NULL OR ' \
+              f'"{getFldName(cls.tblObjName(), "fldDateExit")}" == 0) ; '
+        temp = dbRead(cls.tblObjName(), sql)
+        if not isinstance(temp, DataTable):
+            val = f"ERR_DBAccess cannot read from table {cls.tblObjDBName()} internal uid_dicts no initialized. " \
+                  f"System cannot operate."
+            krnl_logger.warning(val)
+            raise DBAccessError(val)
+        if temp:
+            idx_uid = temp.getFldIndex("fldObjectUID")
+            col_uid = [j[idx_uid] for j in temp.dataList]
+            idx_dupl = temp.getFldIndex("fld_Duplication_Index")
+            col_duplication_index = [j[idx_dupl] for j in temp.dataList]  # temp.getCol("fld_Duplication_Index")
+            if col_uid:  # and len(col_uid) == len(col_duplication_index):  This check probably not needed.
+                # 1. initializes _active_uids_dict
+                cls._active_uids_dict = dict(zip(col_uid, col_duplication_index))
+
+                # 2. Initializes __active_Duplication_Index_dict ONLY FOR DUPLICATE uids.
+                # An EMPTY _active_duplication_index_dict means there are NO duplicates for that uid in the db table.
+                for item in col_duplication_index:  # item is a _Duplication_Index value.
+                    if col_duplication_index.count(item) > 1:
+                        # Gets all the uids associated to _Duplication_Index
+                        uid_list = [col_uid[j] for j, val in enumerate(col_duplication_index) if val == item]
+                        # ONLY DUPLICATE ITEMS HERE (_Duplication_Index count > 1), to make search more efficient.
+                        cls._active_duplication_index_dict[item] = tuple(uid_list)
+        return None
+
+    @classmethod
+    def _processDuplicates(cls):  # Run by  Caravanas, Geo, Personas in other classes.
+        """             ******  Run from an AsyncCursor queue. NO PARAMETERS ACCEPTED FOR NOW. ******
+                        ******  Run periodically as an IntervalTimer func. ******
+                        ****** This code should (hopefully) execute in LESS than 5 msec (switchinterval).   ******
+        Re-loads duplication management dicts for class cls.
+        @return: True if dicts are updated, False if reading tblAnimales from db fails or dicts not updated.
+        """
+        sql_duplication = f'SELECT * FROM _sys_Trigger_Tables WHERE DB_Table_Name == "{cls.tblObjDBName()}" AND ' \
+                          f'ROWID == Flag_ROWID; '
+
+        temp = dbRead('tbl_sys_Trigger_Tables', sql_duplication)  # Only 1 record (for Terminal_ID) is pulled.
+        if isinstance(temp, DataTable) and temp:
+            time_stamp = temp.getVal(0, 'fldTimeStamp')  # time of the latest update to the table.
+            # print(f'hhhhhhooooooooooolaa!! "{cls.tblObjDBName()}".processDuplicates. TimeStamp  = {time_stamp}!!')
+
+            if isinstance(time_stamp, datetime) and time_stamp > temp.getVal(0, 'fldLast_Processing'):
+                cls._init_uid_dicts()  # Reloads uid_dicts for class Tag.
+                print(f'hhhhhhooooooooooolaa!! Estamos en Caravanas.processDuplicates. Just updated the dicts!!')
+
+                # Updates record in _sys_Trigger_Tables if with all entries for table just processed removed.
+                # TODO(cmt): VERY IMPORTANT. _sys_Trigger_Tables.Last_Processing MUST BE UPDATED here before exiting.
+                _ = setRecord('tbl_sys_Trigger_Tables', fldID=temp.getVal(0, 'fldID'), fldLast_Processing=time_stamp)
+                return True
+        return None
+
+    # __trig_duplication = DBTrigger(trig_name=f'"Trigger_{__tblObjDBName}_INSERT"', trig_type='duplication',
+    #                                trig_string=__generate_trigger_duplication.__func__(__tblObjectsName),
+    #                                tbl_name=__tblObjDBName,
+    #                                process_func=_processDuplicates.__func__)
+
+    __trig_name_replication = 'Trigger_Caravanas Registro De Actividades_INSERT'
+    __trig_name_duplication = 'Trigger_Caravanas_INSERT'
+
+    @classmethod
+    def _processReplicated(cls):
+        pass
+
+
+    # List here ALL triggers defined for Animales table. Triggers can be functions (callables) or str.
+    # TODO: Careful here. _processDuplicates is stored as an UNBOUND method. Must be called as _processDuplicates(cls)
+    __db_triggers_list = [(__trig_name_replication, _processReplicated),
+                          (__trig_name_duplication, _processDuplicates)]
+
 
 
     @classmethod
@@ -101,11 +247,12 @@ class Tag(AssetItem):
     def getStatusDict(cls):
         return cls.__tagStatusDict
 
-    tagElementsList = ('fldID', 'fldTagNumber', 'fldFK_TecnologiaDeCaravana', 'fldTagMarkQuantity', 'fldFK_IDItem',
-                       'fldFK_Color', 'fldFK_TipoDeCaravana', 'fldFK_FormatoDeCaravana' 'fldImage', 'fldDateExit',
+    tagElementsList = ('fldID', 'fldTagNumber', 'fldFK_TagTechnology', 'fldTagMarkQuantity', 'fldFK_IDItem',
+                       'fldFK_Color', 'fldFK_TagType', 'fldFK_TagFormat' 'fldImage', 'fldDateExit',
                        'fldFK_UserID', 'fldTimeStamp', 'fldComment')
 
-    __registerDict = {}  # {tagUUID: tagObject} Registro de Tags, para evitar duplicacion.
+    __registerDict = {}     # {tagUUID: tagObject} Registro de Tags, para evitar duplicacion.
+    # __uidList = []          # Master list of Active UIDs loaded with loadActiveRecords() classmethod
 
     @classmethod
     def getRegisterDict(cls):
@@ -143,36 +290,45 @@ class Tag(AssetItem):
         try:
             UUID(self.__ID)
         except(ValueError, TypeError, AttributeError):
-            raise TypeError(f'ERR_INP_TypeError: Invalid/malformed UID {self.__ID}. Geo object cannot be created.')
+            self.isValid = False
+            self.isActive = False
+            raise TypeError(f'ERR_INP_Invalid / malformed UID {kwargs.get("fldObjectUID")}. Object not created!')
 
+        n = removeAccents(kwargs.get('fldTagNumber', None))
+        if not n or not isinstance(n, str):
+            self.isValid = False
+            self.isActive = False
+            raise TypeError(f'ERR_INP_Invalid / malformed tag number {n}. Object not created!')
+
+        self.__tagNumber = n
         isValid = True
         self.__recordID = kwargs.get('fldID', None)
         # TODO(cmt): OJO! TAGS case-INSENSITIVE con este setup. Se eliminan acentos, dieresis y se pasa a lowercase
-        self.__tagNumber = removeAccents(str(kwargs['fldTagNumber']))
-        # self.__tagUID = self.__ID        # UID para identificacion unica del tag. Por ahora igual al numero..
-        self.__tagTechnology = kwargs['fldFK_TecnologiaDeCaravana']     # Standard, RFID, LORA, Tatuaje.
-        self.__tagMarkQuantity = kwargs['fldTagMarkQuantity']
-        self.__idItem = kwargs['fldFK_IDItem'] if 'fldFK_IDItem' in kwargs else None
-        self.__tagColor = kwargs['fldFK_Color'] if 'fldFK_Color' in kwargs else None
-        self.__tagType = kwargs['fldFK_TipoDeCaravana'] if 'fldFK_TipoDeCaravana' in kwargs else None
-        self.__tagFormat = kwargs['fldFK_FormatoDeCaravana'] if 'fldFK_FormatoDeCaravana' in kwargs else None
-        self.__tagImage = kwargs['fldImage'] if 'fldImage' in kwargs else None
+
+        self.__tagTechnology = kwargs.get('fldFK_TagTechnology')    # Standard, RFID, LORA, Tatuaje.
+        self.__tagMarkQuantity = kwargs.get('fldTagMarkQuantity')
+        self.__idItem = kwargs.get('fldFK_IDItem')
+        self.__tagColor = kwargs.get('fldFK_Color')
+        self.__tagType = kwargs.get('fldFK_TagType')
+        self.__tagFormat = kwargs.get('fldFK_TagFormat')
+        self.__tagImage = kwargs.get('fldImage')
         self.__myProgActivities = {}        #  {paObj: activityID, }
         self.__timeStamp = kwargs.get('fldTimeStamp', None)  # Esta fecha se usa para gestionar objetos repetidos.
-        self.__exitYN = kwargs['fldDateExit'] if 'fldDateExit' in kwargs else None
+        self.__exitYN = kwargs.get('fldDateExit', None)
         if self.__exitYN:
-            self.__exitYN = valiDate(self.__exitYN, 1)  # datetime object o 1 (Salida. Sin fecha)
+            self.__exitYN = valiDate(self.__exitYN, 1)  # datetime object o 1 (Salida sin fecha)
             isActive = False
         else:
             self.__exitYN = 0
             isActive = True
 
-        self.__tagComment = kwargs['fldComment'] if 'fldComment' in kwargs else None
-        self.__tagUserID = kwargs['fldFK_UserID'] if 'fldFK_UserID' in kwargs else None
+        self.__tagComment = kwargs.get('fldComment')   # This line for completeness only.
+        self.__tagUserID = kwargs.get('fldFK_UserID')
         # Clase de objeto a la que se asigna, para evitar asignacion multiple
         self.__assignedToClass = next((kwargs[j] for j in kwargs if 'assignedtocla' in j.lower()), None)
-        self.__assignedTo = None            # Object (of any supported type) to which Tag is assigned.
-        # self._isValid = True
+        self.__assignedToUID = kwargs.get('fldAssignedToUID', None)            # Object to which Tag is assigned.
+        self.__assignedToObject = None          # Object to which tag is assigned. For ease of access.
+
         # Tags no soporta getStatus, _getInventory, getLocalization de memoria  (No se pasa kwargs['memdata'])
         super().__init__(self.__ID, isValid, isActive, *args, **kwargs)
 
@@ -189,8 +345,8 @@ class Tag(AssetItem):
     def getElements(self):               # Diccionario armado durante inicializacion. Luego, NO SE ACTUALIZA. OJO!!
         return {
                 'fldObjectUID': self.ID, 'fldTagNumber': self.__tagNumber, 'fldTagMarkQuantity': self.__tagMarkQuantity,
-                'fldFK_IDItem': self.__idItem, 'fldFK_TipoDeCaravana': self.__tagType,  'fldDateExit': self.__exitYN,
-                'assignedToClass': self.assignedToClass, 'fldFK_FormatoDeCaravana': self.__tagFormat,
+                'fldFK_IDItem': self.__idItem, 'fldFK_TagType': self.__tagType,  'fldDateExit': self.__exitYN,
+                'assignedToClass': self.assignedToClass, 'fldFK_TagFormat': self.__tagFormat,
                 'fldImage': self.__tagImage, 'fldFK_Color': self.__tagColor, 'fldComment': self.__tagComment,
                 'fldFK_UserID': self.__tagUserID, 'fldID': self.__recordID, 'fldTimeStamp': self.__timeStamp,
                 }
@@ -225,6 +381,51 @@ class Tag(AssetItem):
         if not kwargs:
             return None
 
+    @classmethod
+    def getObject(cls, obj_id: str, **kwargs):
+        """ Returns the Tag object associated to name.
+        @param obj_id: can be a UUID or a regular human-readable string (Tag Number for Animals).
+        @param kwargs: dict with Tag info to create an object (as pulled from the Caravanas table).
+        Tags are normalized (removal of accents, dieresis, special characters, convert to lowercase) before processing.
+        @return: Tag Object or None if none found for obj_id passed.
+        """
+        name = kwargs.get('fldObjectUID', obj_id) if isinstance(kwargs, dict) else obj_id
+        if name:
+            try:
+                name = UUID(obj_id.strip())
+            except SyntaxError:
+                if isinstance(name, str):
+                    name = re.sub(r'[\\|/@#$%^*()=+¿?{}"\'<>,:;_-]', ' ', name)  # '-' is NOT a tag name separator.
+                    name_words = [j for j in removeAccents(name).split(" ") if j]
+                    name_words = [j.replace(" ", "") for j in name_words]
+                    name = "".join(name_words)
+                    tagTech = kwargs.get('fldFK_TagTechnology', 1) if isinstance(kwargs, dict) else 1
+                    assignedToClass = kwargs.get('fldAssignedToClass', "") if isinstance(kwargs, dict) else ""
+                    # Formats identifier = "number-technologyIDassignedToClass"
+                    identifier = name + cls.__tagIdentifierChar + tagTech + cls.__name__
+                    sql = f'SELECT * FROM "{cls.__tblObjDBName}" WHERE {getFldName(cls.tblObjName(), "fldIdentifiers")} '\
+                          f'== "{identifier}"; '
+                else:
+                    return None
+            except (ValueError, TypeError, AttributeError):
+                return None
+            else:
+                # Here, look up the object UID in the _Duplication_Index column.
+                sql = f'SELECT * from "{cls.__tblObjDBName}" WHERE {getFldName(cls.tblObjName(), "fldObjectUID") } == '\
+                      f'"{obj_id}" ;'
+            tblQuery = dbRead(cls.tblObjName(), sql)                # DataTable comes with duplicate already removed.
+
+            if not isinstance(tblQuery, DataTable) or not tblQuery:
+                return None   # Empty tuple, for compatibility.
+            elif tblQuery.dataLen > 1:  # Duplicates found. Must find Original Record UID (Based on MIN(fldTimeStamp)).
+                tagIndex = tblQuery.index_min('fldTimeStamp')   # Returns list of indices where fldTimeStamp value is min.
+                if tagIndex:                                    # tagIndex = (idx0, idx1, )
+                    return cls(**tblQuery.unpackItem(tagIndex[0]))  # 1 Tag Object returned.
+                else:
+                    return None
+            else:
+                return cls(**tblQuery.unpackItem(0))  # 1 Tag record found in tblQuery (NO duplicates). 1 Tag obj returned.
+
 
     @property
     def myTimeStamp(self):  # impractical name to avoid conflicts with the many date, timeStamp, fldDate in the code.
@@ -241,6 +442,14 @@ class Tag(AssetItem):
     @assignedToClass.setter
     def assignedToClass(self, val):
         self.__assignedToClass = val        # NO CHECKS MADE HERE!! val must be a valid string.
+
+    @property
+    def assignedToUID(self):
+        return self.__assignedToUID
+
+    @assignedToUID.setter
+    def assignedToUID(self, val):
+        self.__assignedToUID = val  # NO CHECKS!! val must be valid.
 
     @property
     def tagInfo(self, *args):
@@ -280,16 +489,6 @@ class Tag(AssetItem):
         return self.__exitYN
 
     @property
-    def assignedTo(self):
-        """ @return: object to which Tag is assigned. None Tag is not assigned. """
-        return self. __assignedTo
-
-
-    def assignTo(self, val):
-        self.__assignedTo = val         # NO CHECKS!! val must be valid.
-
-
-    @property
     def myProgActivities(self):
         """ Returns dict of ProgActivities assigned to object """
         return self.__myProgActivities  # Dict {paObject: __activityID}
@@ -308,10 +507,13 @@ class Tag(AssetItem):
             except ValueError:
                 return None
 
+
     @classmethod
-    def loadFromDB(cls):
+    def loadFromDB_old(cls):
         """Loads all Active Tags from DB and initializes Tag.__registerDict """
-        temp = getRecords(cls.tblObjName(), '', '', None, '*', fldDateExit=0)
+        # temp = getRecords(cls.tblObjName(), '', '', None, '*', fldDateExit=0)
+        sql = f'SELECT * FROM {getTblName(cls.tblObjName())} WHERE "Salida YN" = 0 OR "Salida YN" IS NULL; '
+        temp = dbRead(cls.tblObjName(), sql)  # temp is a DataTable object.
         if not isinstance(temp, DataTable):
             raise DBAccessError(f"ERR_DBAccess: {temp}.")
 
@@ -321,9 +523,10 @@ class Tag(AssetItem):
                 tagObj.register()
 
         if hasattr(cls, '_fldID_list'):
-            cls._fldID_list = temp.getCol('fldID')      # Initializes fldID_list for processReplicated() to work..
+            cls._fldID_list = temp.getCol('fldID')      # Initializes fldID_list for _processDuplicates() to work..
 
         return None
+
 
     @classmethod
     def generateTag(cls, **kwargs):
@@ -354,7 +557,7 @@ class Tag(AssetItem):
         __tblLinkName = 'tblLinkCaravanasActividades'
         __tblStatusName = 'tblDataCaravanasStatus'
         tblRA = DataTable(__tblRAName)  # Tabla Registro De Actividades
-        tblObject = DataTable(__tblObjName)  # Tabla "Objeto": tblCaravanas, tblAnimales, etc.
+        # tblObject = DataTable(__tblObjName)  # Tabla "Objeto": tblCaravanas, tblAnimales, etc.
         tblLink = DataTable(__tblLinkName)  # Sin argumentos: se crean TODOS los campos de la tabla; _dataList=[]
         tblStatus = DataTable(__tblStatusName)
 
@@ -365,8 +568,8 @@ class Tag(AssetItem):
         tagFormat = next((j for j in kwargs if str(j).lower().__contains__('tagformat')), 'Tarjeta')
         tagStatus = next((j for j in kwargs if str(j).lower().__contains__('status')), 'Alta')
         tagStatus = tagStatus if tagStatus in cls.getStatusDict() else 'Alta'
-        new_tag = cls(fldTagNumber=tagNumber, fldFK_TecnologiaDeCaravana=technology, fldFK_Color=tagColor,
-                       fldFK_TipoDeCaravana=tagType, fldTagMarkQuantity=marks, fldFK_FormatoDeCaravana=tagFormat,
+        new_tag = cls(fldTagNumber=tagNumber, fldFK_TagTechnology=technology, fldFK_Color=tagColor,
+                       fldFK_TagType=tagType, fldTagMarkQuantity=marks, fldFK_TagFormat=tagFormat,
                        fldFK_UserID=sessionActiveUser, fldObjectUID=str(uuid4().hex), fldTimeStamp=time_mt('datetime'))
         temp_elements = new_tag.getElements.copy()
         temp_elements.pop('fldID')
@@ -402,11 +605,15 @@ class Tag(AssetItem):
 
 
     def isAssigned(self):
-        return self.assignedTo
+        return self.assignedToUID
+
+    def assignTo(self, obj):
+        self.__assignedToObject = obj
+
 
 
     @classmethod
-    def processReplicated(cls):
+    def processReplicated(cls):     # TODO: RE-WRITE ALL THIS CODE.
         """             ******  Run periodically as IntervalTimer func. ******
                         ******  IMPORTANT: This code should execute in LESS than 5 msec (switchinterval).      ******
         Used to execute logic for detection and management of INSERTed, UPDATEd and duplicate objects.
@@ -443,17 +650,17 @@ class Tag(AssetItem):
 
                 # If record is repeat (at least one of its identifiers is found in cls._identifiers), updates repeat
                 # records for databases that might have created repeats. Changes are propagated by the replicator.
-                identifs = obj.tagNumber  # getIdentifiers() returns set of identifiers UIDs.
+                identif = obj.tagNumber  # getIdentifiers() returns set of identifiers UIDs.
 
                 """ Checks for duplicate/repeat objects: Must determine which one is the Original and set the record's 
                 fldObjectUID field with the UUID of the Original object and fldExitDate to flag it's a duplicate.
                 """
                 # Note: the search for common identifiers and the logic of using timeStamp assures there is ALWAYS
                 # an Original object to fall back to, to ensure integrity of the database operations.
-                if fullIdentifiers.intersection(identifs):
-                    # TODO(cmt): Here detected duplicates: Assigns Original and duplicates based on myTimeStamp.
+                if fullIdentifiers.intersection(identif):
+                    # TODO(cmt): Here duplicates were detected: Assigns Original and duplicates based on myTimeStamp.
                     for o in objClass.getRegisterDict().values():
-                        if o.tagNumber == identifs:
+                        if o.tagNumber == identif:
                             if o.assignedToClass == obj.assignedToClass: # Duplicate only if tags assigned to same class
                                 if o.myTimeStamp <= obj.myTimeStamp:
                                     original = o
@@ -465,19 +672,18 @@ class Tag(AssetItem):
                                 setRecord(cls.tblObjName(), fldID=duplicate.recordID, fldObjectUID=original.ID,
                                           fldExitDate=time_mt('datetime'))
                                 setRecord(cls.tblObjName(), fldID=original.recordID, fldTagNumber=original.tagNumber)
-                            elif obj_dict.get('fldDB_ID') != MAIN_DB_ID:
+                            elif obj_dict.get('fldTerminal_ID') != TERMINAL_ID:
                                 # If record is not duplicate and comes from another node, adds it to __registerDict.
-                                obj.register()
+                                obj.register()      # TODO: this should no longer be required.
                             break
-                elif obj_dict.get('fldDB_ID') != MAIN_DB_ID:
+                elif obj_dict.get('fldTerminal_ID') != TERMINAL_ID:
                     # If record is not duplicate and comes from another node, adds it to __registerDict.
-                    obj.register()
+                    obj.register()      # TODO: this should no longer be required.
 
         # 2. UPDATE - Checks for UPDATED records modified in other nodes and replicated to this database. Checks are
         # performed based on value of fldUPDATE field (a dictionary) in each record.
         # The check for the node generating the UPDATE is done here in order to avoid unnecessary setting values twice.
-        # UPDATEDict = {temp.getVal(j, 'fldID'): temp.getVal(j, 'fldUPDATE') for j in range(temp.dataLen) if
-        #               temp.getVal(j, 'fldUPDATE')}  # Creates dict only with non-NULL (populated) items.
+
         UPDATEDict = {}
         for j in range(temp.dataLen):
             if temp.getVal(j, 'fldUPDATE'):
@@ -522,52 +728,55 @@ class Tag(AssetItem):
         # Updates list of fldID and list of records with fldExitDate > 0 (Animales con Salida).
         cls._fldID_list = pulled_fldIDCol.copy()  # [o.recordID for o in cls.getRegisterDict().values()]
         cls._fldID_exit_list = exit_recs.copy()
+
+
         return True
 
 
-Tag.loadFromDB()
+Tag.loadFromDB_old()
+
+mm = 7
 
 
 
-
-   #  # Crea Objetos Actividades: 1 para cada Clase definida krnl_tag_activity.py
-   #  __activityName = 'Inventario'
-   #  __inventoryObj = InventoryActivityTag(__activityName, __activitiesDict[__activityName],
-   #                                        __isInventoryActivity[__activityName], activityEnableFull)
-   #
-   #  @property             # Lo importante aqui es que se EJECUTA CODIGO (__setattribute()) antes de retornar un objeto
-   #  def inventory(self):
-   #      self.__inventoryObj.outerObject = self   # obj.__inventoryObj.__setattr__('obj.__outerAttr', obj)
-   #      return self.__inventoryObj  # Retorna objeto __inventoryObj para poder acceder metodos en InventoryActivityAnimal
-   #
-   #  __activityName = 'Status'
-   #  __statusObj = StatusActivityTag(__activityName, __activitiesDict[__activityName],
-   #                                  __isInventoryActivity[__activityName], activityEnableFull)
-   #
-   #  @property
-   #  def status(self):
-   #      self.__statusObj.outerObject = self   # Pasa OBJETO para ser usado por set, get, etc.
-   #      return self.__statusObj  # Retorna objeto __statusObj para poder acceder metodos en clase StatusActivityAnimal
-   #
-   #
-   #
-   #  __activityName = 'Localizacion'
-   #  __localizationObject = LocalizationActivityTag(__activityName, __activitiesDict[__activityName],
-   #                                                 __isInventoryActivity[__activityName], activityEnableFull)
-   #
-   #  @property
-   #  def localization(self):  # obj: objeto Tag que se pasa al atributo __outerAttr__ del objeto LocalizationActivity
-   #      self.__localizationObject.outerObject = self
-   #      return self.__localizationObject  # Retorna objeto __inventoryObj p/ poder acceder metodos en InventoryActivityAnimal
-   #
-   #  __activityName = 'Comision'
-   #  __method_name = 'commission'
-   #  __commissionObject = CommissionActivityTag(__activityName, __activitiesDict[__activityName],
-   #                                             __isInventoryActivity[__activityName], activityEnableFull)
-   #
-   #  @property
-   #  def commission(self):  # obj es un objeto Tag que se pasa al atributo __outerAttr__ del obj.
-   #      self.__commissionObject.outerObject = self
-   #      return self.__commissionObject  # Retorna objeto __commisionObj para acceder metodos en CommissionActivityTag
-   #
-   #
+#  # Crea Objetos Actividades: 1 para cada Clase definida krnl_tag_activity.py
+#  __activityName = 'Inventario'
+#  __inventoryObj = InventoryActivityTag(__activityName, __activitiesDict[__activityName],
+#                                        __isInventoryActivity[__activityName], activityEnableFull)
+#
+#  @property             # Lo importante aqui es que se EJECUTA CODIGO (__setattribute()) antes de retornar un objeto
+#  def inventory(self):
+#      self.__inventoryObj.outerObject = self   # obj.__inventoryObj.__setattr__('obj.__outerAttr', obj)
+#      return self.__inventoryObj  # Retorna objeto __inventoryObj para poder acceder metodos en InventoryActivityAnimal
+#
+#  __activityName = 'Status'
+#  __statusObj = StatusActivityTag(__activityName, __activitiesDict[__activityName],
+#                                  __isInventoryActivity[__activityName], activityEnableFull)
+#
+#  @property
+#  def status(self):
+#      self.__statusObj.outerObject = self   # Pasa OBJETO para ser usado por set, get, etc.
+#      return self.__statusObj  # Retorna objeto __statusObj para poder acceder metodos en clase StatusActivityAnimal
+#
+#
+#
+#  __activityName = 'Localizacion'
+#  __localizationObject = LocalizationActivityTag(__activityName, __activitiesDict[__activityName],
+#                                                 __isInventoryActivity[__activityName], activityEnableFull)
+#
+#  @property
+#  def localization(self):  # obj: objeto Tag que se pasa al atributo __outerAttr__ del objeto LocalizationActivity
+#      self.__localizationObject.outerObject = self
+#      return self.__localizationObject  # Retorna objeto __inventoryObj p/ poder acceder metodos en InventoryActivityAnimal
+#
+#  __activityName = 'Comision'
+#  __method_name = 'commission'
+#  __commissionObject = CommissionActivityTag(__activityName, __activitiesDict[__activityName],
+#                                             __isInventoryActivity[__activityName], activityEnableFull)
+#
+#  @property
+#  def commission(self):  # obj es un objeto Tag que se pasa al atributo __outerAttr__ del obj.
+#      self.__commissionObject.outerObject = self
+#      return self.__commissionObject  # Retorna objeto __commisionObj para acceder metodos en CommissionActivityTag
+#
+#

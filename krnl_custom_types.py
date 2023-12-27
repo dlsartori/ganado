@@ -3,8 +3,8 @@
     Defines JSON serializer class to enable storage of lists, tuples, dicts in JSON format in DB (in cols named 'JSON').
 """
 from krnl_config import lineNum, strError, uidCh, callerFunction, krnl_logger, fDateTime, timerWrapper, print, time_mt,\
-    removeAccents, DISMISS_PRINT, BIT_UPLOAD, BIT_SYNC, db_logger, MAIN_DB_NAME
-from krnl_sqlite import getTblName, getFldName, SQLiteQuery
+    removeAccents, DISMISS_PRINT, BIT_UPLOAD, BIT_SYNC, db_logger, MAIN_DB_NAME, exec_sql
+from krnl_sqlite import getTblName, getFldName, SQLiteQuery, DBDuplicationMgr
 from krnl_parsing_functions import strSQLConditions1Table, strSQLSelect1Table
 from datetime import datetime
 from collections import defaultdict
@@ -95,43 +95,6 @@ class DataUploadCursor(BufferAsyncCursor):      # TODO(cmt): This class and Buff
         #  with all the table data, to optimize the data transfer.
         return tbl.setRecords()              # cur.rowcount de sqlite3 or None if fails
 
-
-    # @classmethod
-    # def format_item(cls, *args, event=None, the_object=None, the_callable=None, **kwargs):
-    #     # TODO(cmt): don't make sense grouping objects here. In any case should be done in the loop function.
-    #     """ Item-specific method to put item on the AsyncBuffer queue
-    #     @param event: Event object that may be passed to signal completion. Not used here.
-    #     @param args: All data to be appended (put) to the queue as a BufferAsyncCursor object.
-    #     @param kwargs: Not used here.
-    #     @param the_object: the object for which the callable is called
-    #     @param the_callable: callable to execute operations on the object.
-    #     @return: type(cursor)=cls -> valid cursor. None -> Invalid object: do NOT enqueue().
-    #     """
-    #     if not isinstance(args, (list, tuple)):
-    #         return None
-    #     if any(not isinstance(j, (list, tuple)) for j in args):  # checks for single record (setRecord() call)
-    #         args = [args, ]
-    #     if cls.__min_block_size == 0:
-    #         return cls(*args, event=event, the_object=the_object, the_callable=the_callable)  # returns cursor.
-    #
-    #     elif len(cls.__temp_buffer) > cls.__min_block_size or time_mt() - cls.__timeout_flag > cls.__timeout_secs:
-    #         with cls.__lock:
-    #             local_list = cls.__temp_buffer.copy()
-    #             local_list.append(*args)
-    #             cls.__temp_buffer *= 0
-    #             cls._temp_buffer_event.set()            # Sets event to signal buffer empty. Can exit application.
-    #         cls.__timeout_flag = time_mt()
-    #         # Creates a cursor with DataUploadCursor.__init__() and sets event and data values.
-    #         return cls(*local_list, event=event, the_object=the_object, the_callable=the_callable)   # returns cursor.
-    #     else:
-    #         if cls._temp_buffer_event.is_set():
-    #             with cls.__lock:
-    #                 cls._temp_buffer_event.clear()      # resets event to signal buffer not empty.
-    #         cls.__temp_buffer.append(*args)
-    #
-    #         return None
-
-
     def reset(self):
         self._args = []
         # self.__timeout_flag = time_mt()
@@ -153,15 +116,16 @@ class DataTable(object):
                  '__fldNamesLen', '__fldIndices', '__uidFldMap', '__isValidFlag', '__undoOnError', '__wrtOrder',
                  '__pkAutoIncrement', '__operatorsDict', '__conditionsDict', '__breakOnError', '__associatedTables',
                  '__successfulAssociatedWrite', '_operation', '__table_default_bitmask', '__db_sync',
-                 '__upload_to_server')
+                 '__upload_to_server', '__process_duplicates')
 
-    __operationsList = ('insert', 'update', 'replace', 'delete', 'cmd1', 'cmd2')
-    __xferableItems = ('_tblName', '_dataList', '_fldNames', '_operation')  # items to pack to JSON for DB synchronizat.
-    _writeObj = SqliteQueueDatabase(MAIN_DB_NAME)  # Definida como class attr. porque SqliteQueueDatabase es singleton
-    __tblUploadName = 'tbl_Upload_To_Server'
-    __uploadTblFields = getFldName(__tblUploadName, '*', 1)       # Full field list for tbl_Upload_To_Server.
+    __operationsList = ('insert', 'update', 'replace', 'delete', 'cmd1', 'cmd2')  # Deprecated.
+    __xferableItems = ('_tblName', '_dataList', '_fldNames', '_operation')  # Deprecated. items to pack to JSON for DB synchronizat.
+    __tblUploadName = 'tbl_Upload_To_Server'         # Deprecated.
+    __uploadTblFields = getFldName(__tblUploadName, '*', 1)       # Full field list for tbl_Upload_To_Server.   # Deprecated.
     __fldOrder = ('fldID', 'fldDBName', 'fldDBTableName', 'fldDBFields', 'fldDBRecord', 'fldDBOperation',
-                  'fldBitmask', 'fldPushUpload', 'fldTimeStampSync')        # field order para _Upload_To_Server table.
+                  'fldBitmask', 'fldPushUpload', 'fldTimeStampSync')       # Deprecated.   # field order para _Upload_To_Server table.
+
+    _writeObj = SqliteQueueDatabase(MAIN_DB_NAME)  # Defined as class attr. 'cause there's only 1 instance per database.
 
     # setRecords() constants:
     __SINGLE_BLOCK_SIZE = 500        # 200: Size of first block of data to write in multi-threading, in data records
@@ -170,7 +134,18 @@ class DataTable(object):
     __func_names_strings = ('setRecords', )
 
     def __init__(self, tblName=None, dList=None, keyFieldNames=None, *args, db_sync=False, upload=1, **kwargs):
+        """
+
+        @param tblName: Table key name. Must be a valid database table.
+        @param dList: List of lists. Data records to populate the table
+        @param keyFieldNames: list of valid field names for tables. Key field Names, in the list order passed.
+        @param args: Data Table table to set arguments to. TODO: to be removed. Incorrect implementation.
+        @param db_sync: Obsolete. Deprecated. TODO: to be removed.
+        @param upload:  Obsolete. Deprecated. TODO: to be removed.
+        @param kwargs: remove_duplicates -> Enable/Disable removal of duplicate records in select tables. Default=True.
+        """
         tblName = str(tblName).strip()
+
         if kwargs.get('non_db_table', None) is True:        # TODO: Placeholder para crear "non-db" tables.
             tblInfo = None
         else:
@@ -185,6 +160,7 @@ class DataTable(object):
             self.__fldUIDs = {}                    # UIDs se crean durante la inicializacion. Se usan en Signatures.
             self._tblName = self.__dbTableName     # Ambos nombres de tabla contienen la particula ERR_
         else:
+            self.__process_duplicates = bool(kwargs.get('remove_duplicate_records', True)) if kwargs else True
             self._tblName = tblName
             self.__isValidFlag = True
             self.__dbTableName = tblInfo[0] if tblInfo else None
@@ -252,6 +228,7 @@ class DataTable(object):
                         if t.tblName == self._tblName and t.dataLen:
                             for j in range(t.dataLen):     # Inicializa registros en dataList (si se pasa mas de 1)
                                 self.setVal(j, **t.unpackItem(j))  # Escribe obj_data de args en dataList[j] (1 o mas reg)
+                            break
                 except (TypeError, ValueError, IndexError, KeyError, NameError):
                     print(f'ERR_INP_InvalidArgument - DataTable __init__({lineNum()})')
                     krnl_logger.error(f'ERR_INP_InvalidArgument - DataTable __init__({lineNum()})')
@@ -271,7 +248,16 @@ class DataTable(object):
                         for j in range(len(kwargsParsed[fName])):  # j es Index de _dataList, fName es fldName
                             if self.getVal(j, fName) is None:
                                 self.setVal(j, fName, kwargsParsed[fName][j])  # Escribe solo si kwargs['fldName'] = None,'',NULL
+
         super().__init__()
+        # if kwargs.get('remove_duplicates', True):
+        #     # If table supports Duplication removes all duplicates and returns Original Record only.
+        #     self.__remove_duplicate_records()
+
+
+    def __bool__(self):             # Allows to check on object as if tblData, if not tblData.
+        return self.isValid and bool(self.dataLen)  # Returns False if dataLen is 0. Otherwise returns True.
+
 
     @property
     def isValid(self):
@@ -344,6 +330,46 @@ class DataTable(object):
     def dbTblName(self):
         return self.__dbTableName if self.isValid is True else None
 
+    def index_min(self, fld: str = None):
+        """
+        Returns the record index (dataList index) where the minimum value of field fld is found.
+        If multiple min values, returns a tuple with all the indices where fld has a min.
+        @param fld: column for which the minimum is required.
+        @return: dataTable index list (tuple).
+        """
+        if isinstance(fld, str):
+            fld = fld.strip()
+            if fld in self._fldNames:
+                col = [j[self._fldNames.index(fld)] for j in self.dataList]     # self.getCol(fld)
+                try:
+                    limit = min(col)
+                except (TypeError, ValueError, AttributeError):
+                    return ()
+                else:
+                    return tuple([i for i, v in enumerate(col) if v == limit])
+        return()
+
+
+    def index_max(self, fld: str = None):
+        """
+        Returns the record index (dataList index) where the maximum value of field fld is found.
+        If multiple max values, returns a tuple with all the indices where fld has a max.
+        @param fld: column for which the maximum is required.
+        @return: dataTable index list (tuple).
+        """
+        if isinstance(fld, str):
+            fld = fld.strip()
+            if fld in self._fldNames:
+                col = [j[self._fldNames.index(fld)] for j in self.dataList]
+                try:
+                    limit = max(col)
+                except (TypeError, ValueError, AttributeError):
+                    return ()
+                else:
+                    return tuple([i for i, v in enumerate(col) if v == limit])
+        return ()
+
+
     @property
     def pkAutoIncrement(self):
         """ Primary Key autoincrements ONLY if field is defined as PRIMARY KEY INTEGER in SQLite"""
@@ -375,6 +401,99 @@ class DataTable(object):
 
     def clear(self):
         self._dataList *= 0
+
+    def __remove_duplicate_records(self):       # TODO: 09-Dec-23: DROP THIS FUNCTION. WILL NOT BE NEEDED.
+        """ Removes duplicate records for tables that implement Duplicate support. For multiple duplicates, returns
+        only the Original Record (duplicate with the earliest value for fldTimeStamp).
+        @return: None
+        """
+        if self._tblName in DBDuplicationMgr.get_tables_with_duplicates():   # updated set with tables with Duplication.
+            if any(f not in self._fldNames for f in ('fldObjectUID', 'fld_Duplication_Index', 'fldTimeStamp')):
+                # Creates auxiliary DataTable to find MIN(fldTimeStamp) if the required fields are not present in self.
+                col_rowid = str(tuple(self.getCol("fldID")))   # Stringed list of fldID values in self DataTable.
+                # sql = f'SELECT {getFldName(self._tblName, "fldID")}, {getFldName(self._tblName, "fldObjectUID")},' \
+                #       f'{getFldName(self._tblName, "fld_Duplication_Index")}, ' \
+                #       f'{getFldName(self._tblName, "fldTimeStamp")}' \
+                #       f'FROM {self.dbTblName} WHERE {getFldName(self._tblName, "fldDateExit")} == 0 OR ' \
+                #       f'{getFldName(self._tblName, "fldDateExit")} IS NULL; '
+                sql = f'SELECT {getFldName(self._tblName, "fldID")}, {getFldName(self._tblName, "fldObjectUID")}, ' \
+                      f'{getFldName(self._tblName, "fld_Duplication_Index")},' \
+                      f'{getFldName(self._tblName, "fldTimeStamp")} FROM {self.dbTblName} WHERE ' \
+                      f'{getFldName(self._tblName, "fldID")} IN {col_rowid}; '
+
+                auxTable = dbRead(self._tblName, sql)
+                if isinstance(auxTable, str) or not auxTable:
+                    return None
+                cols_repeat = auxTable.getCols('fldObjectUID', 'fld_Duplication_Index')
+            else:
+                cols_repeat = self.getCols('fldObjectUID', 'fld_Duplication_Index')   # fields already present in self.
+                auxTable = self
+
+            # Now pulls 1 or multiple Original Records, based on the MIN value of fldTimeStamp for each set of records.
+            # First must identify sets of records with equal fld_Duplication_Index. Stores all records with count > 1.
+            # Creates list of repeat _Duplication_Index and removes repeat items from list.
+            repeat_items_set = set([cols_repeat[1][i] for i in range(len(cols_repeat))
+                                   if cols_repeat[0][i] != cols_repeat[1][i]]) if self.dataLen > 1 else \
+                {auxTable.getVal(auxTable.getRecordIndex(self.getVal(0, 'fldID')), 'fld_Duplication_Index')}
+
+            for v in repeat_items_set:       # i: Index of dataList; v: Field value.
+                # auxDict = {}                # {dataList index: TimeStamp value}
+                # for i in range(auxTable.dataLen):
+                #     if cols_repeat[1][i] == v:   # iterates through col_duplIndex pulling indices when list item = v
+                #         auxDict[i] = auxTable.getVal(i, 'fldTimeStamp')
+
+                # iterates through col_duplIndex pulling indices when list item = v
+                auxDict = {i: auxTable.getVal(i, 'fldTimeStamp') for i in range(auxTable.dataLen)
+                           if cols_repeat[1][i] == v}
+
+                # Identifies the key with the min fldTimeStamp value and removes it from dict.
+                auxDict.pop(min(auxDict, key=auxDict.get))  # removes the FIRST dict key to present a min value.
+
+                # Finally, removes records from DataTable dataList for all sets of repeat _Duplication_Index
+                for key in auxDict:
+                    self.popRecord(key)
+
+
+    def __remove_duplicate_records00(self):
+        """ Removes duplicate records for tables that implemenet Duplicate support.
+        @return: None
+        """
+        if self._tblName in DBDuplicationMgr.get_tables_with_duplicates():   # updated set with tables with Duplication.
+            if any(f not in self._fldNames for f in ('fld_Duplication_Index', 'fldTimeStamp')):
+                # Creates auxiliary DataTable to find MIN(fldTimeStamp) if the required fields are not present in self.
+                col_rowid = str(tuple(self.getCol("fldID")))   # Stringed list of fldID values in self DataTable.
+                sql = f'SELECT {getFldName(self._tblName, "fld_Duplication_Index")},' \
+                      f'{getFldName(self._tblName, "fldTimeStamp")} FROM {self.dbTblName} WHERE ' \
+                      f'{getFldName(self._tblName, "fldID")} IN {col_rowid}; '
+                auxTable = dbRead(self._tblName, sql)
+                if isinstance(auxTable, str) or not auxTable:
+                    return None
+                col_duplIndex = auxTable.getCol('fld_Duplication_Index')
+            else:
+                col_duplIndex = self.getCol('fld_Duplication_Index')        # field already present in self.
+                auxTable = self
+
+            # Now pulls 1 or multiple Original Records, based on the MIN value of fldTimeStamp for each set of records.
+            # First must identify sets of records with equal fld_Duplication_Index. Stores all records with count > 1.
+            repeat_items_list = [val for val in col_duplIndex if col_duplIndex.count(val) > 1]
+            for v in repeat_items_list:       # i: Index of dataList; v: Field value.
+                # auxDict = {}                # {dataList index: TimeStamp value}
+                # for i in range(auxTable.dataLen):
+                #     if col_duplIndex[i] == v:   # iterates through col_duplIndex pulling indices when list item = v
+                #         auxDict[i] = auxTable.getVal(i, 'fldTimeStamp')
+
+                # iterates through col_duplIndex pulling indices when list item = v
+                auxDict = {i: auxTable.getVal(i,'fldTimeStamp') for i in range(auxTable.dataLen) if col_duplIndex[i]==v}
+
+                # Identifies the key with the min fldTimeStamp value and removes it from dict.
+                auxDict.pop(min(auxDict, key=auxDict.get))  # removes the FIRST dict key to present a min value.
+
+                # Finally, removes records from DataTable dataList for all sets of repeat _Duplication_Index
+                for key in auxDict:
+                    self.popRecord(key)
+
+
+
 
 
     def unpackItem(self, j=-1, mode=0, *, fldID=None):
@@ -673,10 +792,11 @@ class DataTable(object):
         if self.isValid:
             fldName = str(fldName).strip()
             fldIndex = self.getFldIndex(fldName)
-            if fldIndex is not None:   # TODO(cmt): fldIndex PUEDE ser 0. Si fldName no existe getFldIndex retorna None.
-                for j in range(self.dataLen):
-                    val = self._dataList[j][fldIndex] if self._dataList[j] else None
-                    retValue.append(val)  # Logica p/ que los indices de getCol sean identicos a los de _dataList.
+            if fldIndex is not None:  # TODO(cmt): fldIndex CAN be 0 ==> When fldName not valid getFldIndex returns None
+                retValue = [j[fldIndex] for j in self.dataList]
+                # for j in range(self.dataLen):
+                #     val = self._dataList[j][fldIndex] if self._dataList[j] else None
+                #     retValue.append(val)  # Logica p/ que los indices de getCol sean identicos a los de _dataList.
                     # Si hay records de _dataList vacios ([]), ese item se completa con None
         return retValue
 
@@ -704,7 +824,7 @@ class DataTable(object):
     __linkTables = ('tblLinkAnimalesActividades', 'tblLinkCaravanasActividades', 'tblLinkPersonasActividades',
                     'tblLinkDispositivosActividades')
 
-    def packTable(self):
+    def packTable(self):            # Deprecated. No longer needed.
         return dict(zip(self.__xferableItems, [self.__getattribute__(j) for j in self.__xferableItems]))
 
     # @classmethod
@@ -899,6 +1019,8 @@ class DataTable(object):
         return cur.rowcount     # cur.rowcount = 0 si funcion falla. Se usa esto para validar escritura.
 
 # ----------------------------------------------- END DataTable ------------------------------------------------ #
+
+
 
 class Amount(Money):
     """
@@ -1316,6 +1438,146 @@ sqlite3.register_adapter(tuple, adapt_to_json)
 
 # ================================================================================================================= #
 
+class DBTrigger(object):
+    """
+    If a record with trig_name exists in DB, initializes the trigger with parameters read from DB, otherwise
+    initializes with data from __init__ arguments. """
+    __trigger_register = []  # Register to access all active triggers.
+    __trigger_tbl_name = 'tbl_sys_Trigger_Tables'
+    __trigger_db_table_name = '_sys_Trigger_Tables'
+    __sql_is_running = 'select * from sqlite_master where type = "trigger" ; '
+
+    def __init__(self, *, trig_name=None, trig_string=None, trig_type=None, process_func=None, calling_obj=None,
+                 create=True):
+
+        self.__trigger_name = trig_name
+        trigger_data = self.__initialize_from_db() if trig_name else {}
+        if trigger_data:
+            self.__trigger_name = trigger_data.get("fldTrigger_Name")
+            self._trigger_string = trigger_data.get("fldTrigger_String")
+            if not isinstance(self._trigger_string, str):
+                self._trigger_string = None
+            self.__trigger_type = trigger_data.get("fldType", '') # duplication,  replication, etc.
+            if isinstance(self.__trigger_type, str):
+                self.__trigger_type = self.__trigger_type.lower()
+            self.__processing_func = process_func or None       # Not read from DB
+            self.__rowid = trigger_data.get("fldID")            # ROWID of the trigger assigned to this DBTrigger obj.
+            self.__calling_object = calling_obj                 # Not read from DB
+            self._isActive = True                               # Active or Inactive Trigger.
+        else:
+            self.__trigger_name = trig_name
+            self._trigger_string = trig_string
+            if not isinstance(self._trigger_string, str):
+                self._trigger_string = None
+            self.__trigger_type = trig_type.lower().strip() if isinstance(trig_type, str) else trig_type  # duplic replic, etc.
+            self.__processing_func = process_func
+            self._isActive = True  # Active or Inactive Trigger.
+            self.__rowid = None         # ROWID of the trigger assigned to this DBTrigger obj.
+            self.__calling_object = calling_obj
+
+        self.__created_in_db = self.__create_db_trigger() if create else False
+        self.__trigger_register.append(self)
+
+
+    @classmethod
+    def get_trigger_register(cls):
+        return cls.__trigger_register
+
+    @property
+    def rowid(self):
+        return self.__rowid
+
+    @property
+    def type(self):
+        return self.__trigger_type
+
+    @property
+    def name(self):
+        return self.__trigger_name
+
+    @property
+    def isActive(self):
+        return self._isActive
+
+    @isActive.setter
+    def isActive(self, val):
+        self._isActive = bool(val)
+
+    @property
+    def processing_method(self):
+        return self.__processing_func
+
+    @property
+    def calling_object(self):
+        return self.__calling_object
+
+    @property
+    def created_in_db(self):
+        return self.__created_in_db
+
+    @classmethod
+    def get_triggers_running(cls):
+        """ Returns a dictionary of the trigger_name: db_table_name for all triggers running in the db.
+            @return: {trigger_name(str): db_tbl_name(str), }. Empty dict if no triggers are running.
+        """
+        fNames, rows = exec_sql(sql=cls.__sql_is_running)
+        if rows:
+            return {j[fNames.index("name")]: j[fNames.index("tbl_name")] for j in rows}
+        return {}
+
+    def is_running(self):
+        """ Queries DB to check if trigger a with trigger_name is running
+            @return: True / False
+        """
+        trigger_dict = self.get_triggers_running()
+        if trigger_dict:
+            trigger_list = [j.lower() for j in trigger_dict]        # all names to lower to compare trigger names.
+            return self.__trigger_name.lower() in trigger_list
+        return False
+
+
+    def __create_db_trigger(self):
+        """ Creates trigger defined by trigger_str in database.
+           @return: True if created in db, False if not created.
+           """
+        # Basic consistency check for trigger_string.
+        if isinstance(self._trigger_string, str) and self._trigger_string.lower().startswith('create '):
+            qryObj = SQLiteQuery()
+            cur = qryObj.execute(self._trigger_string)
+            if not isinstance(cur, sqlite3.Cursor):
+                db_logger.error(f'ERR_DB: Database trigger {self._trigger_string} could not be created.')
+            return True
+        return False
+
+    def _drop_db_trigger(self):
+        """ Creates trigger defined by trigger_str in database.
+           @return: None
+           """
+        if self.__trigger_name:
+            qryObj = SQLiteQuery()
+            cur = qryObj.execute(f'DROP IF EXISTS {self.__trigger_name}; ')
+            if not isinstance(cur, sqlite3.Cursor):
+                db_logger.error(f'ERR_DB: Database trigger {self.__trigger_name} could not be dropped.')
+        return None
+
+
+    def __initialize_from_db(self):
+        """ Gets record associated to this trigger object. Needed to query TimeStamp and Last_Processing.
+        If trigger_name is found in _sys_Trigger_Tables, initializes the object to the parametes read from DB.
+        @return: dict with parameters or {} if none found. """
+        sql = f'SELECT * FROM "{self.__trigger_db_table_name}" WHERE ROWID == Flag_ROWID AND "Activa YN" > 0; '
+        temp = dbRead(self.__trigger_tbl_name, sql)
+        if not isinstance(temp, str) and temp:
+            col_names = temp.getCol('fldTrigger_Name')
+            for i, name in enumerate(col_names):
+                if isinstance(name, str):
+                    if name.lower() in self.__trigger_name.lower():
+                        return temp.unpackItem(i)
+        return {}
+
+# --------------------------------------- End class DBTrigger -------------------------------------------------
+
+
 @timerWrapper(iterations=50)
 def setRecord(tblName: str, *, mode=None, **kwargs):
     """
@@ -1326,8 +1588,8 @@ def setRecord(tblName: str, *, mode=None, **kwargs):
     Campos especiales: fldTimeStamp y fldFK_UserID -> Siempre se deberan setear con valores del sistema antes de pasar
         a setRecord() o cualquier otra funcion de escritura en DB. IGNORA (no escribe) valores None o NULL
     Uso:
-        setRecord('tblCaravanas', fldID=395, fldFK_Color=4, fldFK_FormatoDeCaravana=4) → actualiza reg. con recordID=395
-        setRecord('tblCaravanas', fldTagNumber='TEST', fldFK_Color=3, fldFK_FormatoDeCaravana=1) → inserta un nuevo reg.
+        setRecord('tblCaravanas', fldID=395, fldFK_Color=4, fldFK_TagFormat=4) → actualiza reg. con recordID=395
+        setRecord('tblCaravanas', fldTagNumber='TEST', fldFK_Color=3, fldFK_TagFormat=1) → inserta un nuevo reg.
     @param tblName: (string) KeyName de tabla
     @param kwargs: (string) KeyName de campo = (any) valor a escribir
     @param mode: Future development: INSERT OR -> REPLACE, ABORT, FAIL, IGNORE, ROLLBACK
@@ -1360,7 +1622,7 @@ def setRecord(tblName: str, *, mode=None, **kwargs):
             strSQL += f'"{i}"=?, '
         strSQL = strSQL[:-2] + f' WHERE "{db_fldID}"={fldIDValue}; '
         sqlParams = list(wrtDict.values())
-        print(f'strSQL setRecord() *** UPDATE ***: {strSQL}', dismiss_print=DISMISS_PRINT)
+        # print(f'strSQL setRecord() *** UPDATE ***: {strSQL}', dismiss_print=DISMISS_PRINT)
     else:                   # TODO(cmt): ****** INSERT ******: SQL string parametrizado para insertar el nuevo record.
         db_operation = 'INSERT'
         wrtDict[db_fldID] = None       # INSERT: Crea campo fldID (Si no existe) y setea valor a None (NULL en SQLite)
@@ -1663,11 +1925,11 @@ def setupArgs(tblName: str, *args, **kwargs):
     return tblArgs
 
 
-def dbRead(tblName, strSQL: str, mode=0):  # _tblName necesario para armar la estructura de retorno  TODO(cmt): NUEVA
+def dbRead(tblName: str, strSQL: str, mode=0):  # tblName necesario para armar la estructura de retorno TODO(cmt): NUEVA
     """
     Reads records from DB using argument strSQL. strSQL must be valid, with access to 1 table only.
     mode: 0(Default): returns DataTable Object  -> THIS IS THE MORE EFFICIENT WAY TO PROCESS DATA
-          1: returns list of dictionaries [{fldName1:value1, fldName2:value2, }, {fldName1:value3, fldName2: value4, }, ]
+          1: returns list of dictionaries [{fldName1:value1, fldName2:value2, }, {fldName1:value3, fldName2: value4, },]
     @return: mode 0: Object of class DataTable with all the obj_data queried. (Default)
              mode 1: List of dictionaries [{fld1:val1, fld2:val2, }, {fld3:val2, fld1:val4, fld2:val5,}, ]. Each
              dictionary maps to a record (row) from DB and goes to a record item in DataTable.

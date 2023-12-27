@@ -1,6 +1,6 @@
 from krnl_config import *
 from krnl_tag import Tag
-from custom_types import getRecords, DataTable, close_db_writes
+from krnl_custom_types import getRecords, DataTable, close_db_writes
 from datetime import datetime
 from krnl_object_instantiation import loadItemsFromDB
 from krnl_geo_new import Geo
@@ -43,6 +43,8 @@ if __name__ == '__main__':
         tblDataOwners.setVal(j, fldFK_Persona=tblOwners.getVal(j, 'fldID'), fldPercentageOwnership=1/tblOwners.dataLen,
                              fldComment=tblOwners.getVal(j, 'fldLastName') + ', ' + tblOwners.getVal(j, 'fldName'))
     print(f'Owners: {tblDataOwners.unpackItem(0)}')
+
+    bovines[0].inventory.set(date='2023-11-01 15:00:00')
 
     newAnimal = Bovine.alta('Nacimiento', tblAnimals, tblCategory, tblStatus, tblDataOwners, tblLocalization,
                                       tags=newTag)

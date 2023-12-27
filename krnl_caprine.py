@@ -155,6 +155,7 @@ class Caprine(Mammal):
             isValid = True
             isActive = True
             self.__comment = kwargs['fldComment'] if 'fldComment' in kwargs else ''
+            kwargs['memdata'] = True  # Habilita datos en memoria (last_inventory data) en EntityObject
         super().__init__(*args, **kwargs)
 
         # Registra objeto (Bovine) en __registerDict, inicializa variable moduleRunning a 1. Si es generic
@@ -193,7 +194,7 @@ class Caprine(Mammal):
             raise ValueError(f'ERR_INP_InvalidArgument: ID_Animal and/or Fecha De Nacimiento are missing.')
 
     @classmethod
-    def getTotalAnimals(cls, mode=1):          # Total Bovine Animals in __registerDict.
+    def getTotalCount(cls, mode=1):          # Total Bovine Animals in __registerDict.
         """
         Counts total animals for given Animal Class.
         @param mode: 0: ALL ID_Animal in Animal.__registerDict for given class.
@@ -442,7 +443,7 @@ class CategoryActivity(CaprineActivity):
         @return:
         """
         for j in cls.__registerDict.values():
-            j.category.compute()
+            j.category.compute(verbose=True)
 
     @classmethod
     def updateTimeout_bkgd(cls):

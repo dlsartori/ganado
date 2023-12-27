@@ -1,8 +1,9 @@
 import threading
 from abc import ABC
-from custom_types import DataTable, setRecord, delRecord, setupArgs, getRecords, dbRead
+from krnl_custom_types import DataTable, setRecord, delRecord, setupArgs, getRecords, dbRead, DBTrigger
 from krnl_config import *
 from krnl_sqlite import getFldCompare
+from krnl_db_access import _create_db_trigger
 from threading import Lock
 from krnl_exceptions import DBAccessError
 from collections import defaultdict
@@ -86,8 +87,6 @@ class Activity(ABC):
                  '__tblObjectsName', '_memFuncBusy'
                  )
 
-
-
     def __init_subclass__(cls, **kwargs):
         try:        # Uses __ to ensure __method_name is not inherited, then must check for name-mangling in getattr()
             if getattr(cls, '_' + cls.__name__ + '__method_name') is not None:  # _method is inherited-> creates a mess.
@@ -96,14 +95,61 @@ class Activity(ABC):
         except (AttributeError, NameError):
             print(f'UUUUUUUUUUUUUHH Activity.__init_subclass__(): No __method_name for {cls} - {moduleName()}({lineNum()})')
         super().__init_subclass__(**kwargs)
-        # Load ALL elements of the dictionary that have value == cls.
-        for k, v in tables_and_binding_objects.items():
-            if cls.__name__ == v:
-                # 1. Replaces Object_Name with object (ex: 'Animal' with <class Animal>) in tables_and_binding_objects.
-                tables_and_binding_objects[k] = cls
-                # 2. Gets method/function from Method_Name via getattr()
-                if k in tables_and_methods:
-                    tables_and_methods[k] = getattr(cls, tables_and_methods[k]) or None  # A bound method is returned.
+
+        # Name mangling required here to prevent inheritance from resolving to wrong data.
+        triggers_list = getattr(cls, '_' + cls.__name__ + '__db_triggers_list', None)
+        if triggers_list:
+            for j in triggers_list:
+                if isinstance(j, (list, tuple)) and len(j) == 2:  # j=(trigger_name, trigger_processing_func (callable))
+                    _ = DBTrigger(trig_name=j[0], process_func=j[1], calling_obj=cls)
+
+
+
+        # # TODO: THESE ARE THE NEW TRIGGERS. Initializes all db triggers defined for class cls, if any.
+        # triggers_dict = getattr(cls, '_' + cls.__name__ + '__db_triggers_list', None)
+        # if triggers_dict:  # Name mangling required here to prevent inheritance from resolving to wrong data.
+        #     for trig in triggers_dict:
+        #         if 'repl' in trig.type():
+        #             classes_with_replication[trig] = cls  # {trigger_obj: calling object for method, }
+        #         elif 'dupl' in trig.type:
+        #             classes_with_duplication[trig] = cls
+        #         else:
+        #             pass
+
+        # # Initializes all db triggers defined for class cls, if any. TODO: THESE ARE THE NEW TRIGGERS.
+        # triggers_dict = getattr(cls, '_' + cls.__name__ + '__db_triggers_list', None)
+        # if triggers_dict:           # Name mangling required here to prevent inheritance from resolving to wrong data.
+        #     for item in triggers_dict:
+        #         if callable(item):
+        #             trigger_str = item(cls)
+        #             item_name = item.__name__
+        #         elif hasattr(item, '__func__'):
+        #             trigger_str = item.__func__(cls)
+        #             item_name = item.__func__.__name__
+        #         elif isinstance(item, str):
+        #             trigger_str = item
+        #             item_name = item
+        #         else:
+        #             trigger_str = None
+        #             item_name = ''
+        #         if trigger_str:
+        #             _create_db_trigger(trigger_str)  # Runs ALL triggers defined for cls.
+        #             # classes_with_replication = {id(trigger_generator): [cls, processing_function(callable)], }
+        #             if 'repl' in item_name.lower():
+        #                 classes_with_replication[id(item)] = (cls, triggers_dict[item])
+        #             elif 'dupl' in item_name.lower():
+        #                 classes_with_duplication[id(item)] = (cls, triggers_dict[item])
+        #         else:
+        #             pass
+
+        # # Load ALL elements of the dictionary that have value == cls.
+        # for k, v in tables_and_binding_objects.items():
+        #     if cls.__name__ == v:
+        #         # 1. Replaces Object_Name with object (ex: 'Animal' with <class Animal>) in tables_and_binding_objects.
+        #         tables_and_binding_objects[k] = cls
+        #         # 2. Gets method/function from Method_Name via getattr()
+        #         if k in tables_and_methods:
+        #             tables_and_methods[k] = getattr(cls, tables_and_methods[k]) or None  # A bound method is returned.
 
     @classmethod
     def register_class(cls):
@@ -289,16 +335,20 @@ class Activity(ABC):
         #  SAME activity and SAME Thread is not supported). Used by all re-entrant methods (that could be called by
         #  different threads: Activity.__call__, _setInventory, _setStatus, _setLocaliz, _getRecordLinkTables, etc.).
         self.__outerAttr = {}  # Atributo DINAMICO. {threadID: outerObject, }
+        # self.__outerAttr = defaultdict(list)      # Re-entrant structure: {threadID: [outerObject1, outerObject2, ] }
         self._decoratorName = next((kwargs[j] for j in kwargs if 'decorator' in str(j).lower()), None)
         self.__excluded_fields = (self.getActivityExcludedFieldsClose(self._activityName) or set()).union(excluded_fields)
         super().__init__()
 
     @property
-    def outerObject(self):
+    def outerObject(self):          # invoked from AnimalActivity, PersonActivity, TagActivity __call__() functions.
         if self.__outerAttr:
             k = threading.current_thread().ident
             if k in self.__outerAttr:
                 return self.__outerAttr[k]
+
+                # if self.__outerAttr[k]:             # TODO: 2 Lines for for Activity re-entrant code.
+                #     return self.__outerAttr[k][-1]
             else:
                 val = f'ERR_SYS_Threading: __outerAttr called by {self} with key {threading.current_thread().ident} ' \
                           f'but key does not exist in __outerAttr dictionary.'
@@ -316,6 +366,15 @@ class Activity(ABC):
         if obj is not None:
             self.__outerAttr[threading.current_thread().ident] = obj      # TODO: Is this line thread-safe?? Check..
 
+            # TODO: Lines below for Activity re-entrant code (implements a stack of Animal objects for each thread_id).
+            # self.__outerAttr[threading.current_thread().ident].append(obj)    # Adds animal obj to stack.
+            #
+            # def inner(func, *args, **kwargs):
+            #     ret = func(*args, **kwargs)
+            #     self.__outerAttr[threading.current_thread().ident].pop()      # Removes animal obj from stack.
+            #     return ret
+            #
+            # return inner
 
     def _pop_outerAttr_key(self, thread_id):            # Private method. Not meant for general use.
         """ This one is important: when a thread is shutdown, this function must be called for all the active Activity
@@ -398,6 +457,7 @@ class Activity(ABC):
 
     def _outerAttr(self):
         return self.__outerAttr  # In order to look at __outerAttr during debugging.
+
 
     # @staticmethod                   # TODO: DEPRECATED. NO SE USA MAS as of 4.1.7!
     # def memFuncReentryWrapper(func):  # Wrapper to manange re-entry of memory-writing functions for SAME outerObject
@@ -514,27 +574,33 @@ class Activity(ABC):
                 tblData.setVal(0, fldMemData=1)  # Activa flag Memory Data en el registro que se escribe en DB
             idActividadRA = self._createActivityRA(tblRA, tblLink, tblData, **kwargs)
             retValue = idActividadRA
-
             if isinstance(retValue, int):
-                """ En caso e reentry solo escribira en memoria el valor de eventDate mas alto disponible """
-                with self.__lock:  # lock: the whole block must be atomic to ensure integrity of what's written to mem.
-                    if outer_obj.lastInventory:
-                        if outer_obj._lastInventory[1] < eventDate:
-                            # Writes items to memory list only if data in memory is from a date EARLIER than eventDate.
-                            outer_obj.lastInventory = [eventDate, eventDate]
-                    else:
-                        outer_obj.lastInventory = [eventDate, eventDate]
-            else:
-                retValue = f'ERR_Sys_Object not valid or activity not defined: {retValue}- {callerFunction()}'
-                krnl_logger.info(retValue)
-                print(f'{moduleName()}({lineNum()} - {retValue}', dismiss_print=DISMISS_PRINT)
+                memVal = self.outerObject.get_memory_data().get('last_inventory', None)
+                if not memVal or memVal < eventDate:
+                    with self.__lock:
+                        self.outerObject.set_memory_data(memVal, key='last_inventory')
+
+            # if isinstance(retValue, int):
+            #     """ En caso e reentry solo escribira en memoria el valor de eventDate mas alto disponible """
+            #     with self.__lock:  # lock: the whole block must be atomic to ensure integrity of what's written to mem.
+            #         if outer_obj.lastInventory:
+            #             if outer_obj._lastInventory[1] < eventDate:
+            #                 # Writes items to memory list only if data in memory is from a date EARLIER than eventDate.
+            #                 outer_obj.lastInventory = [eventDate, eventDate]
+            #         else:
+            #             outer_obj.lastInventory = [eventDate, eventDate]
+            # else:
+            #     retValue = f'ERR_Sys_Object not valid or activity not defined: {retValue}- {callerFunction()}'
+            #     krnl_logger.info(retValue)
+            # print(f'{moduleName()}({lineNum()} - {retValue}', dismiss_print=DISMISS_PRINT)
+
+
+            return retValue
         else:
-            retValue = None
-
-        return retValue
+            return None
 
 
-    def _getInventory(self, sDate='', eDate='', *args, event_date=False, **kwargs):
+    def _getInventory(self, sDate='', eDate='', *args, event_date=False, mode='mem', **kwargs):
         """
         Returns ALL records in table Data Inventario between sValue and eValue. sValue=eValue ='' -> Last record
         @param sDate: No args: Last Record; sDate=eDate='': Last Record;
@@ -543,20 +609,20 @@ class Activity(ABC):
         @param eDate: See @param sDate.
         @param event_date: True -> Returns the timestamp the value requested was recorded instead of the value itself.
         Used in ProgActivities.
-        @param kwargs: mode='value' -> Returns last value from DB. If no mode or mode='memory' returns value from Memory.
+        @param mode: ='value' -> Returns last value from DB. If no mode or mode='memory' returns value from Memory.
         @return: Object DataTable with information from queried table or statusID (int) if mode=val
         """
         fldName = 'fldDate'
-        modeArg = 'value'           # kwargs.get('mode', 'mem')
+        modeArg = mode.lower().strip() if isinstance(mode, str) else 'value'
         retValue = None
 
-        # if 'mem' in modeArg.lower():
-        #     # Todo(cmt): esto para aprovechar los datos en memoria y evitar accesos a DB.
-        #     if self.outerObject.supportsMemData:
-        #         # Returns data from memory
-        #         return self.outerObject.lastInventory if not event_date else self.outerObject._lastInventory[1]
-        #     else:
-        #         modeArg = 'value'
+        if 'mem' in modeArg:
+            # Todo(cmt): esto para aprovechar los datos en memoria y evitar accesos a DB.
+            if self.outerObject.supportsMemData:
+                # get_memory_data() returns a dictionary. One of its keys is 'last_inventory'.
+                return self.outerObject.get_memory_data().get('last_inventory', None)
+            else:
+                modeArg = 'value'
 
         tblRA = setupArgs(self._tblRAName, *args)  # __tblRAName viene de class Activity
         tblLink = setupArgs(self._tblLinkName, *args)  # __tblLinkName viene de class Activity
@@ -589,7 +655,6 @@ class Activity(ABC):
                        'isProg' = True/False -> Activity is Programmed Activity, or not. If not passed -> assumes False.
         @return: Success: ID_Actividad RA (int), Error: errorCode (str)
         """
-        # reentryLevel = kwargs.get('reentry_level', 0)    # toma valor pasado por el wrapper (si se llamo via wrapper)
         args = [j for j in args if isinstance(j, DataTable)]
         tblData = next((j for j in args if j.tblName == self._tblDataName), None)
         tblData = tblData if tblData else DataTable(self._tblDataName)
@@ -619,7 +684,9 @@ class Activity(ABC):
             activityID = activityID if activityID else self._activityID
             tblRA.setVal(0, fldFK_NombreActividad=activityID)
             tblData.setVal(0, fldDate=eventDate)
-            currentStatusID = self.outerObject.status.get()  # Toma valor de memoria si objeto tiene supportMemData=True
+            # TODO(cmt): this is safe, as get() call refers to same outerObj. Overwrites Status __outerAttr
+            #  with same value.
+            currentStatusID = self.outerObject.status.get()
 
             # permittedFrom()  definida en las sub-Clases (Tag, Animal, PersonActivityAnimal, Bovine, Caprine, etc)
             if statusDict[status][0] in self.permittedFrom()[currentStatusID] or kwargs.get('enforce'):  # Ignora no permitidos.
@@ -629,20 +696,20 @@ class Activity(ABC):
                 tblData.setVal(0, fldFK_Status=statusDict[status][0], fldFlag=statusDict[status][1],
                                fldComment=commentData)
 
-                if self.outerObject.supportsMemData:  # parametros para actualizar variables en memoria se pasan en
-                    tblData.setVal(0, fldMemData=1)  # Activa flag Memory Data en el registro que se escribe en DB
+                # if self.outerObject.supportsMemData:  # parametros para actualizar variables en memoria se pasan en
+                #     tblData.setVal(0, fldMemData=1)  # Activa flag Memory Data en el registro que se escribe en DB
                 idActividadRA = self._createActivityRA(tblRA, tblLink, tblData, **kwargs)
                 retValue = idActividadRA
 
                 if isinstance(retValue, int):
-                    """ En caso e reentry solo escribira en memoria el valor de eventDate mas alto disponible """
-                    with self.__lock:  # lock: the whole block must be atomic to ensure integrity of what's written to mem.
-                        if self.outerObject.lastStatus:
-                            if self.outerObject._lastStatus[1] < eventDate:
-                                # Writes the list to memory only if memory data is from a date EARLIER than eventDate.
-                                self.outerObject.lastStatus = [statusDict[status][0], eventDate]
-                        else:
-                            self.outerObject.lastStatus = [statusDict[status][0], eventDate]
+                    # """ En caso e reentry solo escribira en memoria el valor de eventDate mas alto disponible """
+                    # with self.__lock:  # lock: the whole block must be atomic to ensure integrity of what's written to mem.
+                    #     if self.outerObject.lastStatus:
+                    #         if self.outerObject._lastStatus[1] < eventDate:
+                    #             # Writes the list to memory only if memory data is from a date EARLIER than eventDate.
+                    #             self.outerObject.lastStatus = [statusDict[status][0], eventDate]
+                    #     else:
+                    #         self.outerObject.lastStatus = [statusDict[status][0], eventDate]
 
                     if flagExecInstance:
                         self._paCreateExecInstance(outer_obj=self.outerObject)
@@ -698,7 +765,6 @@ class Activity(ABC):
             else:
                 # Retorna DataTable con registros.
                 retValue = result
-
         return retValue
 
 
@@ -710,11 +776,11 @@ class Activity(ABC):
         tables for a LocalizationActivityAnimal operation.
         @param tblRA, tblLink, tblData: list of DataTable objects, with all the tables and fields to be written to DB
         @param args: Additional obj_data tablas to write (Inventory, etc): WRITTEN AS PASSED. They must come here complete!
-        @return: Success: ID_Actividad RA (int), Error: errorCode (str)
+        @return: Success: ID_Actividad RA (int), Error: errorCode (str) or None.
         """
-        tblData = next((j for j in args if isinstance(j, DataTable) and j.tblName == self._tblDataName), None)
-        tblData = tblData if tblData else DataTable(self._tblDataName)
-        loc = tblData.getVal(0, 'fldFK_Localizacion')
+        tblData = next((j for j in args if isinstance(j, DataTable) and j.tblName == self._tblDataName),
+                       DataTable(self._tblDataName))
+        loc = tblData.getVal(0, 'fldFK_Localizacion') or None
         if not loc:
             loc = kwargs.get('localization', None)
         elif isinstance(loc, str):
@@ -724,9 +790,8 @@ class Activity(ABC):
 
         if self._isValid and self.outerObject.validateActivity(self._activityName):
             # Prioridad eventDate:    1: fldDate(tblData); 2: kwargs(fecha valida); 3: timeStamp.
-            timeStamp = time_mt('datetime')
             eventDate = getEventDate(tblDate=tblData.getVal(0, 'fldDate'), defaultVal=time_mt('datetime'), **kwargs)
-            flagExecInstance = self.outerObject.lastLocalization != loc
+            flagExecInstance = (self.outerObject.localization.get() != loc)
             tblRA = next((j for j in args if j.tblName == self._tblRAName), DataTable(self._tblRAName))
             tblLink = next((j for j in args if j.tblName == self._tblLinkName), DataTable(self._tblLinkName))
             activityID = tblRA.getVal(0, 'fldFK_NombreActividad')
@@ -734,19 +799,19 @@ class Activity(ABC):
             tblRA.setVal(0, fldFK_NombreActividad=activityID)
             tblData.setVal(0, fldFK_Localizacion=loc.ID, fldFK_NivelDeLocalizacion=loc.localizLevel, fldDate=eventDate)
 
-            if self.outerObject.supportsMemData:  # parametros para actualizar variables en memoria se pasan en
-                tblData.setVal(0, fldMemData=1)         # Activa flag Memory Data en el registro que se escribe en DB
+            # if self.outerObject.supportsMemData:  # parametros para actualizar variables en memoria se pasan en
+            #     tblData.setVal(0, fldMemData=1)         # Activa flag Memory Data en el registro que se escribe en DB
             idActividadRA = self._createActivityRA(tblRA, tblLink, tblData, **kwargs)
             retValue = idActividadRA
             if isinstance(retValue, int):
-                """ Escribe en Memoria SIEMPRE (en todos los reentry), con el valor de eventDate mas alto disponible """
-                with self.__lock:  # lock: the whole block must be atomic to ensure integrity of what's written to mem.
-                    if self.outerObject.lastLocalization:
-                        if self.outerObject._lastLocalization[1] < eventDate:
-                            # Writes the list to memory only if data in memory is from a date EARLIER than eventDate.
-                            self.outerObject.lastLocalization = [loc, eventDate]
-                    else:
-                        self.outerObject.lastLocalization = [loc, eventDate]
+                # """ Escribe en Memoria SIEMPRE (en todos los reentry), con el valor de eventDate mas alto disponible """
+                # with self.__lock:  # lock: the whole block must be atomic to ensure integrity of what's written to mem.
+                #     if self.outerObject.lastLocalization:
+                #         if self.outerObject._lastLocalization[1] < eventDate:
+                #             # Writes the list to memory only if data in memory is from a date EARLIER than eventDate.
+                #             self.outerObject.lastLocalization = [loc, eventDate]
+                #     else:
+                #         self.outerObject.lastLocalization = [loc, eventDate]
 
                 # TODO: Here go the matchAndClose() checks and inventory checks.
                 if flagExecInstance:
@@ -1032,7 +1097,11 @@ class Activity(ABC):
         commentRA = tblRA.getVal(0, 'fldComment', '') or ''
         commentRA += (' ' if commentRA else '') + f'ObjectID:{fldFK_val} / {self._activityName}'
         tblRA.setVal(0, fldTimeStamp=timeStamp, fldFK_UserID=userID, fldFK_NombreActividad=activityID,
-                     fldComment=commentRA)
+                     fldComment=commentRA, fldTerminal_ID=f"{TERMINAL_ID}")     # Sets Terminal_ID to optimize Triggers.
+        if tblRA.tblName.lower() == 'tblAnimalesRegistroDeActividades'.lower():
+            # Inicializa Clase de Animal en tblRA Animales.
+            tblRA.setVal(0, fldFK_ClaseDeAnimal=self.outerObject.animalClassID())
+
         if not idActividadRA:
             idActividadRA = setRecord(tblRA.tblName, **tblRA.unpackItem(0))  # TODO(cmt): AQUI GENERA DB LOCKED ERROR DESDE FRONTEND
             if isinstance(idActividadRA, str):
@@ -1043,7 +1112,12 @@ class Activity(ABC):
         else:
             # Se paso idActividad RA en tblRA: TODO(cmt) Busca fldID de tblLink (que debe existir por la correspondencia
             #  1->1 entre tblRA y tblLink) y setea al valor correspondiente p/ generar UPDATE de tblLink
-            temp = getRecords(tblLink.tblName, '', '', None, 'fldID', fldFK=fldFK_val, fldFK_Actividad=idActividadRA)
+            # temp = getRecords(tblLink.tblName, '', '', None, 'fldID', fldFK=fldFK_val, fldFK_Actividad=idActividadRA)
+
+            sql = f'SELECT "{tblLink.getDBFldName("fldID")}" FROM "{tblLink.dbTblName} WHERE ' \
+                  f'"{tblLink.getDBFldName("fldFK")}" == {fldFK_val} AND ' \
+                  f'"{tblLink.getDBFldName("fldFK_Actividad")}" == {idActividadRA}; '
+            temp = dbRead(tblLink.tblName, sql)
             if not isinstance(temp, str):
                 recordID = temp.getVal(0, 'fldID')
                 if recordID:
@@ -1051,7 +1125,8 @@ class Activity(ABC):
 
         commentLink = tblLink.getVal(0, 'fldComment') or ''
         commentLink += (' ' if commentLink else '') + f'Activity: {activityID} / {eventDate}'
-        tblLink.setVal(0, fldFK_Actividad=idActividadRA, fldFK=fldFK_val, fldDB_ID=MAIN_DB_ID, fldComment=commentLink)
+        tblLink.setVal(0, fldFK_Actividad=idActividadRA, fldFK=fldFK_val, fldTerminal_ID=TERMINAL_ID,
+                       fldComment=commentLink)
         tblLink.undoOnError = True
         idLinkRecord = setRecord(tblLink.tblName, **tblLink.unpackItem(0))
         if isinstance(idLinkRecord, str):
@@ -1447,6 +1522,7 @@ class Activity(ABC):
         activity. The calling activity (self) is Closing Activity. The Activity to be closed must be found in RAP.
         @param args: DataTable arguments (tblLinkPA, tblPADataStatus).
         @param execute_fields: {fldName: fldValue, } dict with execution fields to compare against progActivities fields
+            execute_fields must contain a valid closing date for the Activity.
         @param idClosingActivity: idActivityRA (attached to self) that works as closing activity.
         @param closing_status: string. Optional. A key from _paStatusDict. If 'closedBaja' is passed, closes ALL
         activities in myProgActivities for outer object.
@@ -1616,7 +1692,7 @@ class Activity(ABC):
 
         if hasattr(outer_obj, 'animalClassID'):
             temp: DataTable = getRecords(self.__tblRAPName, '', '', None, '*', fldFlag=(1, 2),
-                                         fldFK_ClaseDeAnimal=outer_obj.animalClassID)
+                                         fldFK_ClaseDeAnimal=outer_obj.animalClassID())
         else:
             temp: DataTable = getRecords(self.__tblRAPName, '', '', None, '*', fldFlag=(1, 2))
         # print(f'{moduleName()}({lineNum()}) - JJJJJJJJJJJJJJJJJJJJJJust entering {callerFunction(getCallers=True)}')

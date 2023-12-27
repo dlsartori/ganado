@@ -4,7 +4,7 @@ from krnl_db_access import writeObj
 from krnl_async_buffer import AsyncBuffer
 from krnl_object_instantiation import loadItemsFromDB
 from uuid import uuid4
-from custom_types import getRecords, DataTable
+from krnl_custom_types import getRecords, DataTable
 from krnl_bovine import Bovine
 
 def createUID(tblName: str):

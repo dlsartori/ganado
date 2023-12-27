@@ -6,7 +6,7 @@ import time
 from time import sleep
 from krnl_cfg import *
 import functools
-from custom_types import DataTable, setupArgs
+from krnl_custom_types import DataTable, setupArgs
 from krnl_cfg import moduleName, callerFunction
 from operator import attrgetter
 from json import dump, dumps, loads, load

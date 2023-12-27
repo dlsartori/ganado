@@ -1,6 +1,6 @@
 from krnl_config import lineNum, callerFunction, valiDate, os, datetime, fDateTime, singleton, krnl_logger
 from krnl_abstract_base_classes import AbstractFactoryBaseClass
-from custom_types import setupArgs, setRecord, delRecord
+from krnl_custom_types import setupArgs, setRecord, delRecord
 from krnl_tag import Tag                        # Se tiene que importar esta clase porque se invoca el constructor
 from krnl_bovine import Bovine                  # Se tiene que importar esta clase porque se invoca el constructor
 from krnl_caprine import Caprine                # Se tiene que importar esta clase porque se invoca el constructor

@@ -1,8 +1,8 @@
 from krnl_config import fDateTime, strError, sessionActiveUser, callerFunction, time_mt, \
     lineNum, valiDate, removeAccents, os, singleton, krnl_logger, print, DISMISS_PRINT
-from custom_types import setupArgs, getRecords, setRecord, delRecord
+from krnl_custom_types import setupArgs, getRecords, setRecord, delRecord
 from krnl_transactionalObject import TransactionalObject
-from custom_types import DataTable
+from krnl_custom_types import DataTable
 
 def moduleName():
     return str(os.path.basename(__file__))

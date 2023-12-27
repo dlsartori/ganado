@@ -1,13 +1,13 @@
 from __future__ import annotations
 from abc import ABC
 # from krnl_parsing_functions import fldNameFromUID, tblNameFromUID
-from custom_types import DataTable, setRecord, delRecord
+from krnl_custom_types import DataTable, setRecord, delRecord
 from krnl_config import *
 from threading import Lock
 from krnl_exceptions import DBAccessError
 from datetime import tzinfo, datetime, timedelta
 # from krnl_geo_new import Geo
-from custom_types import setupArgs, getRecords
+from krnl_custom_types import setupArgs, getRecords
 """
 Implements Classes ProgActivity, ActivityTrigger
 """
@@ -175,7 +175,7 @@ class ProgActivity(ABC):
             RAP_dict = {}
         self.__ID = ID      # asigna fldID (int) a __ID.
         self.__isValidFlag = isValid
-        self.__DB_ID = RAP_dict.get('fldDB_ID', None)
+        self.__Terminal_ID = RAP_dict.get('fldTerminal_ID', None)
         self.__isActive = RAP_dict.get('fldFlag', 1)  # 0: Not Active; 1: Active; 2: Permanent Activity.
         self.__animalClass = RAP_dict.get('fldFK_ClaseDeAnimal')
         self._sequence = RAP_dict.get('fldFK_Secuencia', None)
@@ -217,7 +217,7 @@ class ProgActivity(ABC):
 
     @property
     def dbID(self):
-        return self.__DB_ID
+        return self.__Terminal_ID
 
     def getPAFields(self):
         return self.__jsonDataClose
@@ -343,7 +343,7 @@ class ProgActivity(ABC):
 
         # 2. Si progActivity no existe -> crea objeto y registros nuevos en DB
         retValue = None
-        tblRAP.setVal(0, fldFK_Actividad=activityID, fldDB_ID=MAIN_DB_ID)   # Sets DB_ID in DataTable for later use.
+        tblRAP.setVal(0, fldFK_Actividad=activityID, fldTerminal_ID=TERMINAL_ID)   # Sets fldTerminal_ID for later use.
         # TODO(cmt): tblDataProgramacion MUST COME FULLY populated for data integrity. tblLinkPA can be empty.
         tblLinkPA = next((j for j in args if j.tblName == cls.tblLinkPAName()), DataTable(cls.tblLinkPAName()))
         tblDataProg = next((j for j in args if j.tblName == cls.tblDataProgramacionName()),
@@ -389,7 +389,7 @@ class ProgActivity(ABC):
 
 
     @classmethod
-    def loadFromDB(cls):
+    def loadFromDB(cls):            # TODO: 18-dec-23 TO BE DEPRECATED. ProgActivity Objects to be created on demand.
         """ Loads ProgActivities from DB Tables, creates PA Objects and returns list of objects.
         DOES NOT write to registerDict. This is to be done by the subclasses on their particular dictionaries.
         @return: PA list [pa1, pa2, ] with pa: ProgActivity Object. ERR_(str) if fails. [] if no progActivities loaded.
@@ -429,6 +429,49 @@ class ProgActivity(ABC):
             return f'{moduleName()}({lineNum()}) - {err}'
 
         return []  # Returns [] if no progActivities loaded
+
+    @classmethod
+    def loadFromDB00(cls):
+        """ Loads ProgActivities from DB Tables, creates PA Objects and returns list of objects.
+        DOES NOT write to registerDict. This is to be done by the subclasses on their particular dictionaries.
+        @return: PA list [pa1, pa2, ] with pa: ProgActivity Object. ERR_(str) if fails. [] if no progActivities loaded.
+        """
+        if cls is ProgActivity:
+            return []  # Wrong class, exits with nothing.
+
+        tblRAP = getRecords(cls.tblRAPName(), '', '', None, '*', fldFlag=(1, 2))  # Only active and permanent Activities
+        tblDataProg = getRecords(cls.tblDataProgramacionName(), '', '', None, '*')
+        if isinstance(tblRAP, DataTable) and isinstance(tblDataProg, DataTable):
+            if tblRAP.dataLen:
+                objList = []
+                for j in range(tblRAP.dataLen):
+                    RAPDict = tblRAP.unpackItem(j)
+                    activityID = RAPDict.get('fldFK_Actividad', None)
+                    idDataProg = tblRAP.getVal(j, 'fldFK_DataProgramacion')
+                    dataProgFullData = next((tblDataProg.unpackItem(j) for j in range(tblDataProg.dataLen)
+                                             if tblDataProg.getVal(j, 'fldID') == idDataProg), {})
+                    if dataProgFullData and activityID:
+                        progDataFields = set(tblDataProg.fldNames) - cls._excludedFieldsDefault()
+                        progDataDict = {k: dataProgFullData.get(k) for k in progDataFields}
+                        jsonDictClose = dataProgFullData.get('fldPAData', {})
+                        jsonDictCreate = dataProgFullData.get('fldPADataCreacion', {})
+                        try:
+                            obj = cls(RAPDict['fldID'], True, activityID, activityEnableFull, RAP_dict=RAPDict,
+                                      prog_data_dict=progDataDict, json_dict_create=jsonDictCreate,
+                                      json_dict_close=jsonDictClose, excluded_fields=())
+                            objList.append(obj)
+                        except (TypeError, AttributeError, NameError, ValueError):
+                            pass  # Ignores any non valid data.
+                print(f'abstract_class_prog_activity PA Objects: {[j.activityID for j in objList]}')
+                return objList
+        else:
+            err = f'ERR_DB_Cannot read table(s) from DB: {tblRAP + ", " if isinstance(tblRAP, str) else ""} ' \
+                  f'{tblDataProg if isinstance(tblDataProg, str) else ""}'
+            krnl_logger.error(err)
+            return f'{moduleName()}({lineNum()}) - {err}'
+
+        return []  # Returns [] if no progActivities loaded
+
 
 
     @classmethod

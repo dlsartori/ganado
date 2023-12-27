@@ -4,7 +4,7 @@ from PyQt6.QtCore import Qt
 import sys
 # https://stackoverflow.com/questions/35950050/how-to-import-python-file-located-in-same-subdirectory-in-a-pycharm-project
 from ui.Test import Ui_MainWindow
-from custom_types import DataTable, getRecords, setRecord
+from krnl_custom_types import DataTable, getRecords, setRecord
 
 
 class MyDialog(QMainWindow, Ui_MainWindow):

@@ -1,5 +1,5 @@
 from krnl_assetItem import AssetItem
-from custom_types import getRecords, DataTable
+from krnl_custom_types import getRecords, DataTable
 GENERIC_DEVICE_ID = 1
 
 
@@ -8,11 +8,13 @@ class Device(AssetItem):                                # Dispositivos
     # objType = 1
     #
 
-    __registerDict = {}
+    # __registerDict = {}
+    _active_uids_dict = {}  # {fldObjectUID: fld_Duplication_Index}
+    _active_duplication_index_dict = {}  # {fld_Duplication_Index: set(fldObjectUID, dupl_uid1, dupl_uid2, ), }
 
-    @classmethod
-    def getRegisterDict(cls):
-        return cls.__registerDict
+    # @classmethod
+    # def getRegisterDict(cls):
+    #     return cls.__registerDict
 
     __tblObjectsName = 'tblDispositivos'
 

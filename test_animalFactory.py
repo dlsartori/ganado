@@ -1,6 +1,6 @@
 from krnl_cfg import lineNum, callerFunction, os, krnl_logger
 from os import path
-from custom_types import DataTable, getRecords
+from krnl_custom_types import DataTable, getRecords
 from krnl_tag import Tag
 from krnl_tag_bovine import TagBovine
 from krnl_tag_caprine import TagCaprine

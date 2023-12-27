@@ -9,7 +9,7 @@ import time
 
 
 from krnl_config import fDateTime
-from custom_types import DataTable, dbRead
+from krnl_custom_types import DataTable, dbRead
 from krnl_parsing_functions import setRecord
 
 

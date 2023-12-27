@@ -1,6 +1,6 @@
 from krnl_config import krnl_logger, print, DISMISS_PRINT, time_mt, singleton, sessionActiveUser, callerFunction, \
     lineNum, valiDate, os, activityEnableFull
-from custom_types import DataTable, setupArgs, getRecords, setRecord, delRecord
+from krnl_custom_types import DataTable, setupArgs, getRecords, setRecord, delRecord
 from datetime import datetime
 from uuid import uuid4
 from krnl_tm import MoneyActivity
@@ -315,9 +315,14 @@ class AltaActivityAnimal(AnimalActivity):
               f'Animal Object is type: {type(animalObj)}   FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF\n',
               dismiss_print=DISMISS_PRINT)
 
-        # Setea Cagetoria
-        animalObj.category.set(tblRA, tblLink, tblDataCategory, categoryID=category)
-        processedTables.update(tblDataCategory.tblName)
+        # Computa y Setea Cagetoria
+        animalObj.category.compute()   # TODO(cmt): This call will set the animal category in __memory_data dictionary.
+
+        # Below: 2 lines with old way of doing categories.
+        # animalObj.category.set(tblRA, tblLink, tblDataCategory, categoryID=category)
+        # processedTables.update(tblDataCategory.tblName)
+
+
 
         # TAGS: Asignacion de tag(s) a animalObj y escritura  en tabla [Data Animales Actividad Caravanas]
         if tags:
@@ -395,6 +400,7 @@ class AltaActivityAnimal(AnimalActivity):
                 tblInventory.setVal(0, fldFK_Actividad=idActividadRA)
                 if tblInventory.getVal(0, 'fldDate') is None:
                     tblInventory.setVal(0, fldDate=eventDate)
+                # TODO(cmt): The call to inventory.set() will set the inventory date in __memory_data dictionary.
                 animalObj.inventory.set(tblRA, tblLink, tblInventory)
                 processedTables.add(tblDataInventory.tblName)
 
@@ -495,7 +501,7 @@ class BajaActivityAnimal(AnimalActivity):
             tblDummyAnimal = DataTable(tblObjectsName)
             tblDummyAnimal.setVal(0, fldFK_ClaseDeAnimal=outerObj.animalClassID, fldDOB=outerObj.dob,
                                   fldTimeStamp=eventDate, fldFK_Raza=outerObj.animalRace, fldCountMe=-1,
-                                  fldFK_AnimalMadre=outerObj.ID, fldDateExit='', fldMF=outerObj.mf)
+                                  fldFK_AnimalMadre=outerObj.ID, fldDateExit=None, fldMF=outerObj.mf)
             tblDummyCategory = DataTable(tblDataCategoriasName)
             tblDummyCategory.setVal(0, fldFK_Categoria=outerObj.category.get())
             tblDummyStatus = DataTable(tblDataStatusName)
@@ -623,7 +629,7 @@ class BajaActivityAnimal(AnimalActivity):
             """ --- Cierra TODAS las ProgActivities en tblLinkPA, tblRAP (si aplica) y tblDataPAStatus --- """
             self._paMatchAndClose(idActividadRA, execute_date=tblData.getVal(0, 'fldDate'))
 
-            _ = animalObj.unRegister()  # pop de Bovine.__registerDict. Llama al metodo unregister() correcto.
+            _ = animalObj.unRegister()  # pops key corresponding to this object from __memory_data dictionary
 
 
             # MoneyActivity: Setea Tabla [Data Animales Actividad MoneyActivity] con la(s) idActividadRA_TM pasadas en *args, si existen.

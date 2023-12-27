@@ -8,7 +8,7 @@ from krnl_config import time_mt
 # from operator import attrgetter
 # from json import dump, dumps, loads, load
 # import time
-from custom_types import getRecords, setRecord, DataTable
+from krnl_custom_types import getRecords, setRecord, DataTable
 from krnl_sqlite import SQLiteQuery
 from functools import reduce
 import itertools

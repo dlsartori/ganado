@@ -2,7 +2,7 @@ from krnl_entityObject import EntityObject
 import re
 from krnl_config import fDateTime, callerFunction, lineNum, removeAccents
 from datetime import datetime
-from custom_types import getRecords, DataTable
+from krnl_custom_types import getRecords, DataTable
 from krnl_abstract_class_prog_activity import ProgActivity
 
 SYSTEM_PERSON_ID = 1
@@ -20,6 +20,9 @@ class Person(EntityObject):                                # Personas
     __activitiesDict = {}         # {NombreActividad: ID_Actividad, }
     __registerDict = {}           # {personID: personObj, } ONLY ACTIVE PERSONS
     __activeProgActivities = []     # List of programmed activities active for Person objects. MUST BE a list.
+
+    _active_uids_dict = {}  # {fldObjectUID: fld_Duplication_Index}
+    _active_duplication_index_dict = {}  # {fld_Duplication_Index: set(fldObjectUID, dupl_uid1, dupl_uid2, ), }
 
     __tblDataStatusName = 'tblDataPersonasStatus'
     __tblObjName = 'tblPersonas'
@@ -154,7 +157,7 @@ class Person(EntityObject):                                # Personas
         """ Returns Person object associated to name.
         Name can be a UUID, one of the person's registered IDs, or the Person's name. In case multiple names match,
         a list of all matches found is returned.
-        @return: Geo object if any found, None if name not found in getGeoEntities dict. List if more than 1 match.
+        @return: Person object if any found, None if name not found in getGeoEntities dict. List if more than 1 match.
         """
         try:
             o = cls.getRegisterDict().get(name, None)               # 1. checks if it's UUID.
@@ -241,9 +244,11 @@ class Person(EntityObject):                                # Personas
         Updates _table_record_count.
         @return: True if update operation succeeds, False if reading tblAnimales from db fails.
         """
-        temp = getRecords(cls.tblObjName(), '', '', None, '*', fldDateExit=0)
-        if not isinstance(temp, DataTable):
+        temp0 = getRecords(cls.tblObjName(), '', '', None, '*', fldDateExit=0)
+        if not isinstance(temp0, DataTable):
             return False
+
+        del temp0
         return True
 
 

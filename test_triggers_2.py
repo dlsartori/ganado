@@ -1,15 +1,14 @@
 import krnl_custom_types
-from krnl_config import DB_REPLICATE,  register_terminal, TERMINAL_ID, time_mt
-from krnl_custom_types import *
-from krnl_db_access import writeObj
-from krnl_async_buffer import AsyncBuffer
-# from krnl_abstract_class_animal import Animal
-from krnl_bovine import Bovine
+from krnl_custom_types import getRecords
+from krnl_abstract_class_animal import Animal
 import datetime
 from krnl_geo_new import Geo
-# from krnl_device import Device
+from krnl_device import Device
+from krnl_bovine import Bovine
+from krnl_config import DB_REPLICATE, tables_and_binding_objects, tables_and_methods, register_terminal, TERMINAL_ID, time_mt
+from krnl_db_access import init_db_replication_triggers
 from krnl_sqlite import getFldCompare
-
+from krnl_threading import checkTriggerTables
 
 maindbID = 'c1434644fb73439e8006acf03ca25df4'
 get_trigger_list = 'select * from sqlite_master where type = "trigger" ; '
@@ -24,14 +23,12 @@ sys_db_id_trigg = 'UPDATE "_sys_terminal_id" SET "Terminal_ID" = "MOMMA" WHERE I
 
 
 if __name__ == '__main__':
-    print(f'\n -------------------------------  Database UID is : "{TERMINAL_ID}" ---------------------------------\n')
-    # if DB_REPLICATE:
-    #     trigger_tables = init_db_replication_triggers()
-    #     print(f'INSERT/UPDATE Triggers created for: {trigger_tables}')
-    #     print(f'tables_and_binding_objs: {tables_and_binding_objects}\ntables_and_methods:{tables_and_methods}.')
+    print(f'\n ----------------------------------  Database UID is : "{TERMINAL_ID}" ----------------------------------\n')
+    if DB_REPLICATE:
+        trigger_tables = init_db_replication_triggers()
+        print(f'INSERT/UPDATE Triggers created for: {trigger_tables}')
+        print(f'tables_and_binding_objs: {tables_and_binding_objects}\ntables_and_methods:{tables_and_methods}.')
 
-    for t in DBTrigger.get_trigger_register():
-        print(f'Trigger Name: {t.name}; rowid: {t.rowid}; Processing Func: {t.processing_method}')
 
     # checkTriggerTables()
     # Animal._processDuplicates()
@@ -39,8 +36,6 @@ if __name__ == '__main__':
     # now = time_mt('datetime')
     # lower_date = now - datetime.timedelta(days=580)
     # tblRA = getRecords('tblAnimalesRegistroDeActividades', lower_date, now, 'fldTimeStamp', '*')
-
-
 
 
 

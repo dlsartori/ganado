@@ -1,7 +1,9 @@
 import sqlite3
 import re
-from krnl_config import sessionActiveUser, callerFunction, time_mt, lineNum, removeAccents, os, krnl_logger
-from custom_types import getRecords, setRecord, delRecord, DataTable
+from krnl_config import sessionActiveUser, callerFunction, time_mt, lineNum, removeAccents, os, krnl_logger, exec_sql
+from krnl_custom_types import getRecords, setRecord, dbRead, DataTable, DBTrigger, getFldName
+from krnl_sqlite import getTblName
+from datetime import datetime
 from uuid import uuid4, UUID
 from krnl_exceptions import DBAccessError
 from krnl_transactionalObject import TransactionalObject
@@ -39,6 +41,7 @@ class Geo(TransactionalObject):
     __tblEntityTypesName = 'tblGeoTiposDeEntidad'
     __tblLocalizationLevelsName = 'tblGeoNivelesDeLocalizacion'
     __tblObjectsName = __tblEntitiesName
+    __tblObjectsDBName = getTblName(__tblObjectsName)
     __registerDict = {}         # {fldObjectUID: geoObj, }
 
     def __call__(self, caller_object=None, *args, **kwargs):        # Not sure this is required here.
@@ -59,6 +62,8 @@ class Geo(TransactionalObject):
     # _new_local_fldIDs = []  # UID list for records added tblAnimales by local application.
     _fldUPDATE_counter = 0  # Monotonic counter to detect and manage record UPDATEs.
 
+    _active_uids_dict = {}  # {fldObjectUID: fld_Duplication_Index}
+    _active_duplication_index_dict = {}  # {fld_Duplication_Index: set(fldObjectUID, dupl_uid1, dupl_uid2, ), }
 
     @classmethod
     def getGeoEntities(cls):
@@ -76,14 +81,208 @@ class Geo(TransactionalObject):
         __localizationLevelsDict[removeAccents(temp1.dataList[j][1])] = [temp1.dataList[j][2], temp1.dataList[j][3],
                                                                          temp1.dataList[j][4], temp1.dataList[j][5],
                                                                          temp1.dataList[j][0]]
-
     @classmethod
     def tblObjName(cls):
         return cls.__tblObjectsName
 
     @classmethod
+    def tblObjDBName(cls):
+        return cls.__tblObjectsDBName
+
+
+    @classmethod
     def getLocalizLevelsDict(cls):
         return cls.__localizationLevelsDict
+
+    # reserved name, so that it's not inherited by lower classes, resulting in multiple executions of the trigger.
+    @staticmethod
+    def _generate_trigger_duplication(tblName):
+        temp = DataTable(tblName)
+        tblObjDBName = temp.dbTblName
+        Dupl_Index_val = f'(SELECT DISTINCT _Duplication_Index FROM "{tblObjDBName}" WHERE Identificadores_str ' \
+                         f'== NEW. Identificadores_str AND "FechaHora Registro" == (SELECT MIN("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM "{tblObjDBName}" ' \
+                         f'WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL))) AND ' \
+                         f'("Salida YN" == 0 OR "Salida YN" IS NULL)), '
+
+        flds_keys = f'_Duplication_Index'
+        flds_values = f'{Dupl_Index_val}'
+        if isinstance(temp, DataTable) and temp.fldNames:
+            flds = temp.fldNames
+            excluded_fields = ['fldID', 'fldObjectUID', 'fldTimeStamp', 'fldTerminal_ID', 'fld_Duplication_Index']
+
+            # TODO: Must excluded all GENERATED COLUMNS to avoid attempts to update them, which will fail. fldID must
+            #  always be removed as its value is previously defined by the INSERT operation that fired the Trigger.
+            tbl_info = exec_sql(sql=f'PRAGMA TABLE_XINFO("{tblObjDBName}");')
+            if len(tbl_info) > 1:
+                idx_colname = tbl_info[0].index('name')
+                idx_hidden = tbl_info[0].index('hidden')
+                tbl_data = tbl_info[1]
+                restricted_cols = [tbl_data[j][idx_colname] for j in range(len(tbl_data)) if
+                                   tbl_data[j][idx_hidden] > 0]
+                if restricted_cols:  # restricted_cols: Hidden and Generated cols do not support UPDATE operations.
+                    restricted_fldnames = [k for k, v in temp.fldMap().items() if v in restricted_cols]
+                    excluded_fields.extend(restricted_fldnames)
+                excluded_fields = tuple(excluded_fields)
+
+            for f in excluded_fields:
+                if f in flds:
+                    flds.remove(f)
+            fldDBNames = [v for k, v in temp.fldMap().items() if
+                          k in flds]  # [getFldName(cls.tblObjName(), f) for f in flds]
+            flds_keys += f', {str(fldDBNames)[1:-1]}'  # [1:-1] removes starting and final "[]" from string.
+
+            for f in fldDBNames:
+                flds_values += f'NEW."{f}"' + (', ' if f != fldDBNames[-1] else '')
+        db_trigger_duplication_str = f'CREATE TRIGGER IF NOT EXISTS "Trigger_{tblObjDBName}_INSERT" AFTER INSERT ON "{tblObjDBName}" ' \
+                                     f'FOR EACH ROW BEGIN ' \
+                                     f'UPDATE "{tblObjDBName}" SET Terminal_ID = (SELECT Terminal_ID FROM _sys_terminal_id LIMIT 1), _Duplication_Index = NEW.UID_Objeto ' \
+                                     f'WHERE "{tblObjDBName}".ROWID == NEW.ROWID AND _Duplication_Index IS NULL; ' \
+                                     f'UPDATE "{tblObjDBName}" SET ({flds_keys}) = ({flds_values}) ' \
+                                     f'WHERE "{tblObjDBName}".ROWID IN (SELECT "{temp.getDBFldName("fldID")}" FROM (SELECT DISTINCT "{temp.getDBFldName("fldID")}", "FechaHora Registro" FROM "{tblObjDBName}" ' \
+                                     f'WHERE Identificadores_str == NEW.Identificadores_str ' \
+                                     f'AND ("Salida YN" == 0 OR "Salida YN" IS NULL) ' \
+                                     f'AND "FechaHora Registro" >= (SELECT MIN("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM "{tblObjDBName}" ' \
+                                     f'WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL))))); ' \
+                                     f'UPDATE _sys_Trigger_Tables SET TimeStamp = NEW."FechaHora Registro" ' \
+                                     f'WHERE DB_Table_Name == "{tblObjDBName}" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID AND NEW.Terminal_ID IS NOT NULL; ' \
+                                     f'END; '
+
+        print(f'Mi triggercito "{temp.dbTblName}" es:\n {db_trigger_duplication_str}')
+        return db_trigger_duplication_str
+
+
+    @classmethod
+    def _generate_trigger_duplication00(cls):
+        Dupl_Index_val = f'(SELECT DISTINCT _Duplication_Index FROM "{cls.tblObjDBName()}" WHERE Identificadores_str ' \
+                         f'== NEW. Identificadores_str AND "FechaHora Registro" == (SELECT MIN("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM "{cls.tblObjDBName()}" ' \
+                         f'WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL))) AND ' \
+                         f'("Salida YN" == 0 OR "Salida YN" IS NULL)), '
+
+        flds_keys = f'_Duplication_Index'
+        flds_values = f'{Dupl_Index_val}'
+        temp = DataTable(cls.tblObjName())
+        if temp.fldNames:
+            flds = temp.fldNames
+            excluded_fields = ['fldID', 'fldObjectUID', 'fldTimeStamp', 'fldTerminal_ID', 'fld_Duplication_Index']
+
+            # TODO: Must excluded all GENERATED COLUMNS to avoid attempts to update them, which will fail. fldID must
+            #  always be removed as its value is previously defined by the INSERT operation that fired the Trigger.
+            tbl_info = exec_sql(sql=f'PRAGMA TABLE_XINFO("{cls.tblObjDBName()}");')
+            if len(tbl_info) > 1:
+                idx_colname = tbl_info[0].index('name')
+                idx_hidden = tbl_info[0].index('hidden')
+                tbl_data = tbl_info[1]
+                restricted_cols = [tbl_data[j][idx_colname] for j in range(len(tbl_data)) if
+                                   tbl_data[j][idx_hidden] > 0]
+                if restricted_cols:  # restricted_cols: Hidden and Generated cols do not support UPDATE operations.
+                    restricted_fldnames = [k for k, v in temp.fldMap().items() if v in restricted_cols]
+                    excluded_fields.extend(restricted_fldnames)
+                excluded_fields = tuple(excluded_fields)
+
+            for f in excluded_fields:
+                if f in flds:
+                    flds.remove(f)
+            fldDBNames = [v for k, v in temp.fldMap().items() if
+                          k in flds]  # [getFldName(cls.tblObjName(), f) for f in flds]
+            flds_keys += f', {str(fldDBNames)[1:-1]}'  # [1:-1] removes starting and final "[]" from string.
+
+            for f in fldDBNames:
+                flds_values += f'NEW."{f}"' + (', ' if f != fldDBNames[-1] else '')
+        db_trigger_duplication_str = f'CREATE TRIGGER IF NOT EXISTS "Trigger_{cls.tblObjDBName()}_INSERT" AFTER INSERT ON "{cls.tblObjDBName()}" ' \
+                                     f'FOR EACH ROW BEGIN ' \
+                                     f'UPDATE "{cls.tblObjDBName()}" SET Terminal_ID = (SELECT Terminal_ID FROM _sys_terminal_id LIMIT 1), _Duplication_Index = NEW.UID_Objeto ' \
+                                     f'WHERE "{cls.tblObjDBName()}".ROWID == NEW.ROWID AND _Duplication_Index IS NULL; ' \
+                                     f'UPDATE "{cls.tblObjDBName()}" SET ({flds_keys}) = ({flds_values}) ' \
+                                     f'WHERE "{cls.tblObjDBName()}".ROWID IN (SELECT "{temp.getDBFldName("fldID")}" FROM (SELECT DISTINCT "{temp.getDBFldName("fldID")}", "FechaHora Registro" FROM "{cls.tblObjDBName()}" ' \
+                                     f'WHERE Identificadores_str == NEW.Identificadores_str ' \
+                                     f'AND ("Salida YN" == 0 OR "Salida YN" IS NULL) ' \
+                                     f'AND "FechaHora Registro" >= (SELECT MIN("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM "{cls.tblObjDBName()}" ' \
+                                     f'WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL))))); ' \
+                                     f'UPDATE _sys_Trigger_Tables SET TimeStamp = NEW."FechaHora Registro" ' \
+                                     f'WHERE DB_Table_Name == "{cls.tblObjDBName()}" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID AND NEW.Terminal_ID IS NOT NULL; ' \
+                                     f'END; '
+
+        print(f'Mi triggercito "{cls.tblObjDBName()}" es:\n {db_trigger_duplication_str}')
+        return db_trigger_duplication_str
+
+    @classmethod
+    def _init_uid_dicts(cls):
+        """
+        Initializes uid dicts upon system start up and when the dict_update flag is set for the class by SQLite.
+        Method is run in the __init_subclass__() routine in EntityObject class during system start, and by
+        _processDuplicates() run by background functions.
+        @return: None
+        """
+        sql = f'SELECT * from "{cls.tblObjDBName()}" WHERE ("{getFldName(cls.tblObjName(), "fldDateExit")}" IS NULL OR ' \
+              f'"{getFldName(cls.tblObjName(), "fldDateExit")}" == 0) ; '
+        temp = dbRead(cls.tblObjName(), sql)
+        if not isinstance(temp, DataTable):
+            val = f"ERR_DBAccess cannot read from table {cls.tblObjDBName()} internal uid_dicts no initialized. " \
+                  f"System cannot operate."
+            krnl_logger.warning(val)
+            raise DBAccessError(val)
+        if temp:
+            idx_uid = temp.getFldIndex("fldObjectUID")
+            col_uid = [j[idx_uid] for j in temp.dataList]
+            idx_dupl = temp.getFldIndex("fld_Duplication_Index")
+            col_duplication_index = [j[idx_dupl] for j in temp.dataList]  # temp.getCol("fld_Duplication_Index")
+            if col_uid:  # and len(col_uid) == len(col_duplication_index):  This check probably not needed.
+                # 1. initializes _active_uids_dict
+                cls._active_uids_dict = dict(zip(col_uid, col_duplication_index))
+
+                # 2. Initializes __active_Duplication_Index_dict ONLY FOR DUPLICATE uids.
+                # An EMPTY _active_duplication_index_dict means there are NO duplicates for that uid in the db table.
+                for item in col_duplication_index:  # item is a _Duplication_Index value.
+                    if col_duplication_index.count(item) > 1:
+                        # Gets all the uids associated to _Duplication_Index
+                        uid_list = [col_uid[j] for j, val in enumerate(col_duplication_index) if val == item]
+                        # ONLY DUPLICATE ITEMS HERE (_Duplication_Index count > 1), to make search more efficient.
+                        cls._active_duplication_index_dict[item] = tuple(uid_list)
+        return None
+
+    @classmethod
+    def _processDuplicates(cls):  # Run by  Caravanas, Geo, Personas in other classes.
+        """             ******  Run from an AsyncCursor queue. NO PARAMETERS ACCEPTED FOR NOW. ******
+                        ******  Run periodically as an IntervalTimer func. ******
+                        ****** This code should (hopefully) execute in LESS than 5 msec (switchinterval).   ******
+        Re-loads duplication management dicts for class cls.
+        @return: True if dicts are updated, False if reading tblAnimales from db fails or dicts not updated.
+        """
+        sql_trigger_tables = f'SELECT * FROM _sys_Trigger_Tables WHERE DB_Table_Name == "{cls.tblObjDBName()}" AND ' \
+                          f'ROWID == Flag_ROWID; '
+
+        temp = dbRead('tbl_sys_Trigger_Tables', sql_trigger_tables)  # Only 1 record (for Terminal_ID) is pulled.
+        if isinstance(temp, DataTable) and temp:
+            time_stamp = temp.getVal(0, 'fldTimeStamp')  # time of the latest update to the table.
+            # print(f'hhhhhhooooooooooolaa!! "{cls.tblObjDBName()}".processDuplicates - TimeStamp  = {time_stamp}!!')
+            # val = values_list[0] if values_list else None
+            # if val:
+            if isinstance(time_stamp, datetime) and time_stamp > temp.getVal(0, 'fldLast_Processing'):
+                cls._init_uid_dicts()  # Reloads uid_dicts for class Geo.
+                print(f'hhhhhhooooooooooolaa!! Estamos en Geo.processDuplicates. Just updated the dicts!!')
+                # If dicts are processed, remove animalClassID items from db _sys_Trigger_Table.
+
+                # Updates record in _sys_Trigger_Tables if with all entries for table just processed removed.
+                # TODO(cmt): VERY IMPORTANT. _sys_Trigger_Tables.Last_Processing MUST BE UPDATED here before exiting.
+                _ = setRecord('tbl_sys_Trigger_Tables', fldID=temp.getVal(0, 'fldID'), fldLast_Processing=time_stamp)
+                return True
+        return None
+
+    # __trig_duplication = DBTrigger(trig_name=f'"Trigger_{__tblObjectsDBName}_INSERT"', trig_type='duplication',
+    #                                trig_string=_generate_trigger_duplication.__func__(__tblObjectsName),
+    #                                # tbl_name=__tblObjectsDBName,
+    #                                process_func=_processDuplicates.__func__)
+
+    # __trig_name_replication = 'Trigger_Geo Entidades Registro De Actividades_INSERT'
+    __trig_name_duplication = 'Trigger_Geo Entidades_INSERT'
+
+    @classmethod
+    def _processReplicated(cls):
+        pass
+
+    # List here ALL triggers defined for Animales table. Triggers can be functions (callables) or str.
+    # TODO: Careful here. _processDuplicates is stored as an UNBOUND method. Must be called as _processDuplicates(cls)
+    __db_triggers_list = [(__trig_name_duplication, _processDuplicates), ]
 
     def __init__(self, *args, **kwargs):                    # Falta terminar este constructor
         self.__ID = str(kwargs.get('fldObjectUID'))
@@ -198,7 +397,7 @@ class Geo(TransactionalObject):
             # Initializes the full_uid_list. Used to drive the duplicate detection logic.
         cls._fldID_list = set(g.recordID for g in cls.getGeoEntities().values())
         # Initializes _object_fldUPDATE_dict={fldID: fldUPDATE(dictionary), }. Used to process records UPDATEd by other nodes.
-        cls._fldUPDATE_dict = {g.recordID: temp1.getVal('fldUPDATE', fldID=g.recordID) for g in
+        cls._fldUPDATE_dict = {g.recordID: temp1.getVal(0, 'fldUPDATE', fldID=g.recordID) for g in
                                cls.getGeoEntities().values()}
 
         return True
@@ -233,22 +432,6 @@ class Geo(TransactionalObject):
                     if isinstance(obj, Geo):
                         # print(f'obj is: {o.name}')
                         yield obj
-
-    @classmethod
-    # @timerWrapper(iterations=5)
-    def processReplicated(cls):
-        """             ******  Run periodically as IntervalTimer func. ******
-                        ******  IMPORTANT: This code should execute in LESS than 5 msec (switchinterval).      ******
-        Used to execute logic for detection and management of duplicate objects.
-        Defined for Animal, Tag, Person. (Geo has its own function on TransactionalObject class).
-        Checks for additions to tblAnimales from external sources (db replication) for Valid and Active objects.
-        Updates _table_record_count.
-        @return: True if update operation succeeds, False if reading tblAnimales from db fails.
-        """
-        temp = getRecords(cls.tblObjName(), '', '', None, '*', fldDateExit=0)
-        if not isinstance(temp, DataTable):
-            return False
-        return True
 
 
     @property
@@ -433,8 +616,9 @@ class Geo(TransactionalObject):
 
 # ---------------------------------------------- End Class Geo --------------------------------------------------- #
 # Complete initialization of Geo objects and data interfacess. Create Container Trees for Geo objects.
-# TODO: Got to do this here. Cannot do in loadFromDB()!!.
+# TODO: Got to do this here. Cannot do in loadFromDB_old()!!.
 for o in Geo.getGeoEntities().values():
+    # print(f'Geo Object: {o.name}')
     o._generate_container_tree()
 
 # These adapter / converter are used for 'ID_Localizacion' fields across the DB. NOT USED WITH THE Geo Tables, though..

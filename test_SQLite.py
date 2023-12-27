@@ -7,7 +7,7 @@ from time import sleep
 from krnl_config import fDateTime
 from krnl_cfg import getNow
 import functools
-from custom_types import DataTable, dbRead
+from krnl_custom_types import DataTable, dbRead
 from krnl_parsing_functions import setRecord, getRecords
 
 

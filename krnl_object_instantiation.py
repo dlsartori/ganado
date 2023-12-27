@@ -1,7 +1,7 @@
-from krnl_config import krnl_logger, print, DISMISS_PRINT, MAIN_DB_ID
+from krnl_config import krnl_logger, print, DISMISS_PRINT, TERMINAL_ID
 from krnl_tm import *
 from krnl_abstract_class_animal import Animal
-# from krnl_tag import Tag        # needed to initialize Tag.__registerDict.
+from krnl_tag import Tag        # needed to initialize Tag.__registerDict.
 # from krnl_person import Person
 # from krnl_animal_factory import animalCreator
 
@@ -10,13 +10,13 @@ from krnl_abstract_class_animal import Animal
 def moduleName():
     return str(os.path.basename(__file__))
 
-# Tag.loadFromDB()
+# Tag.loadFromDB_old()
 
 def loadItemsFromDB(cls, *, items=(), init_tags=False, **kwargs):
     """
     Loads Animals of class cls from DB. Animal IDs provided in args. If no args, loads all animals.
     @param init_tags: Initialize Tags for objects.
-    @param items: List of items. If none passed. Loads all active items for cls.
+    @param items: List of items (Object table ROWID values). If none passed. Loads all active items for cls.
     @param cls: Bovine, Caprine, Person, Tag, etc.   -> OJO!: Class Object, NOT str.
     @param args: list of animal IDs. If none provided, loads all Animals for class from [tblAnimales]
     @param kwargs: 'initializeTags'=True initializes tags assigned to the Object.
@@ -27,37 +27,36 @@ def loadItemsFromDB(cls, *, items=(), init_tags=False, **kwargs):
     items = items or '*'  # items=() -> lee todos los registros de la tabla ('*' indica a getRecords() todo).
     try:
         if cls.__name__ in ('Animal', 'AssetItem', 'Asset', 'EntityObject'):
-            retValue = f'INFO_Inp_InvalidArgument {cls}. Object Class not supported.'
+            retValue = f'INFO_Inp_InvalidArgument {cls}. Class is not instantiable.'
             krnl_logger.info(retValue)
             return retValue
-    except (TypeError, AttributeError, NameError) as e:
-        retValue = f'INFO_Inp_InvalidArgument {cls}. Object Class not supported.'
+    except (TypeError, AttributeError, NameError):
+        retValue = f'INFO_Inp_InvalidArgument {cls}. Class is not instantiable.'
         krnl_logger.info(retValue)
-        raise AttributeError(e)
+        return retValue
+
 
     if hasattr(cls, 'classID'):
-        if '*' in items:
-            itemsTable = getRecords(cls.tblObjName(), '', '', None, '*',
-                                    fldFK_ClaseDeAnimal=cls.classID(), fldDateExit=0)  # Animales
-        else:
-            itemsTable = getRecords(cls.tblObjName(), '', '', None, '*',
-                                    fldFK_ClaseDeAnimal=cls.classID(), fldDateExit=0, fldID=items)   # Animales
+        itemsTable = getRecords(cls.tblObjName(), '', '', None, '*', fldFK_ClaseDeAnimal=cls.classID(), fldDateExit=0) \
+            if '*' in items else getRecords(cls.tblObjName(), '', '', None, '*', fldFK_ClaseDeAnimal=cls.classID(),
+                                            fldDateExit=0, fldID=items)   # Animales
     else:
-        itemsTable = getRecords(cls.tblObjName(), '', '', None, '*', fldID=items)  # Todos los demas
+        itemsTable = getRecords(cls.tblObjName(), '', '', None, '*') if '*' in items else \
+            getRecords(cls.tblObjName(), '', '', None, '*', fldID=items)  # Todos los demas
 
     # # Carga y asigna listas de Actividades Programadas y Triggers para cada objeto.
     idCol = itemsTable.getCol('fldID')
-    if cls in Animal.getAnimalClasses():
-        tblRA_Desasignados = getRecords(cls.tblRAName(), '', '', None, 'fldID',
-                                        fldFK_NombreActividad=cls.getActivitiesDict()['Caravaneo - Desasignar']) \
-            if init_tags else None
+    # if cls in Animal.getAnimalClasses():
+    #     tblRA_Desasignados = getRecords(cls.tblRAName(), '', '', None, 'fldID',
+    #                                     fldFK_NombreActividad=cls.getActivitiesDict()['Caravaneo - Desasignar']) \
+    #         if init_tags else None
     itemsList = items if items and hasattr(items, '__iter__') and not isinstance(items, str) else idCol
     if itemsList == idCol:
         pass
     else:
         itemsList = [idObj for idObj in itemsList if idObj in idCol]           # validates all items IDs.
 
-    items = []
+    objList = []    # List of objects to be returned
     print(f'Loading {len(itemsList)} {cls.__name__}s from DB: ', end='')
 
     try:
@@ -66,18 +65,18 @@ def loadItemsFromDB(cls, *, items=(), init_tags=False, **kwargs):
         paClass = None    # paClass no definida para cls.
     RAP_col = []
     if paClass:
-        # Pulls RAP records ONLY belonging to this node (fldDB_ID=MAIN_DB_ID). Skips all replicated records.
-        RAPRecords = getRecords(cls.tblRAPName(), '', '', None, 'fldID', fldDB_ID=MAIN_DB_ID)
+        # Pulls RAP records ONLY belonging to this node (fldTerminal_ID=TERMINAL_ID). Skips all replicated records.
+        RAPRecords = getRecords(cls.tblRAPName(), '', '', None, 'fldID', fldTerminal_ID=TERMINAL_ID)
         if isinstance(RAPRecords, DataTable) and RAPRecords.dataLen:
             RAP_col = tuple(RAPRecords.getCol('fldID'))
 
     for j in range(len(itemsList)):
         # itemObj = animalCreator.object_creator(cls, **animalsTable.unpackItem(j)) # Esta tambien funciona bien
-        itemObj = cls(**itemsTable.unpackItem(j))  # LLAMA a __init__(): Crea Obj. Inicializa lastInv,lastStatus,etc
+        itemObj = cls(**itemsTable.unpackItem(j))  # LLAMA a __init__(): Crea Animal Obj.
         if itemObj.isValid and not itemObj.exitYN:
-            itemObj.register()                  # Registra objecto en __registerDict.
+            # itemObj.register()                  # Registra objecto en __registerDict.
             if paClass:   # Registers progActivity in myProgActivities dict if ProgActivities are defined for object.
-                # Populates myProgActivities dict ONLY with ProgActivities generated by the node (DB_ID = MAIN_DB_ID).
+                # Populates myProgActivities dict ONLY with ProgActivities generated by the node (DB_ID = TERMINAL_ID).
                 if RAP_col:                                      # Solo ProgActivities abiertas (sin cierre).
                     linkPARecords = getRecords(cls.tblLinkPAName(), '', '', None, '*', fldFK=itemObj.ID,
                                                 fldFK_ActividadDeCierre=None, fldFK_Actividad=RAP_col)
@@ -102,32 +101,134 @@ def loadItemsFromDB(cls, *, items=(), init_tags=False, **kwargs):
                     krnl_logger.warning(f'ERR_DBReadError: cannot read from table {cls.tblLinkPAName()}. Error: {linkPARecords}')
 
             if init_tags and itemObj.__class__ in Animal.getAnimalClasses():
-                itemObj.tags.initializeTags(tblRA_Desasignados)
-                print(f'@@@@@@ {moduleName()} - bovine[{itemObj}] Category read from DB: {itemObj.category.get()}',
-                      end=' -- ', dismiss_print=DISMISS_PRINT)
+                itemObj.tags.initializeTags()
+                itemObj.category.get()
+                # print(f'@@@@@@ {moduleName()} - bovine[{itemObj}] Category read from DB: {itemObj.category.get()}',
+                #       end=' -- ', dismiss_print=DISMISS_PRINT)
                 itemObj.category.compute()
                 print(f'After Category Update: {itemObj.category.get()}', dismiss_print=DISMISS_PRINT)
+
             # itemObj.inventory.get(mode='value')
             # itemObj.status.get(mode='value')
-            items.append(itemObj)
-        if isinstance(itemObj, Animal):
-            itemObj.updateTimeout_bkgd()            # NO hace falta esto. Solo para testear.
+            objList.append(itemObj)
+        # if isinstance(itemObj, Animal):
+        #     itemObj.updateTimeout_bkgd()            # NO hace falta esto. Solo para testear.
 
-        # try:
-        #     print(f'{itemObj.ID}:Localiz={itemObj.localization.get()},Cat={itemObj.category.get()}',
-        #           end=('; ' if j < len(items)-1 else ''), dismiss_print=DISMISS_PRINT)
-        # except(AttributeError, NameError, TypeError):
-        #     pass
 
-    # # Initializes the full_uid_list. Used to drive the duplicate detection logic.
-    # cls._fldID_list = set(o.recordID for o in cls.getRegisterDict().values())
-    # # Initializes _object_fldUPDATE_dict={fldID: fldUPDATE(dictionary), }. Used to process records UPDATEd by other nodes.
-    # cls._object_fldUPDATE_dict = {o.recordID: itemsTable.getVal('fldUPDATE', fldID=o.recordID) for o in
-    #                               cls.getRegisterDict().values()}
     print(f'------@@@@@@@------ {moduleName()}({lineNum()}) - Total {cls.__name__}s created: {len(items)} ----------\n',
           dismiss_print=DISMISS_PRINT)
-    return list(cls.getRegisterDict().values())    # return items  # Retorna lista de objetos creados, o errorCode (str)
+    return objList    # return items  # Retorna lista de objetos creados, o errorCode (str)
 
+
+
+
+
+# def loadItemsFromDB00(cls, *, items=(), init_tags=False, **kwargs):
+#     """
+#     Loads Animals of class cls from DB. Animal IDs provided in args. If no args, loads all animals.
+#     @param init_tags: Initialize Tags for objects.
+#     @param items: List of items (Object table ROWID values). If none passed. Loads all active items for cls.
+#     @param cls: Bovine, Caprine, Person, Tag, etc.   -> OJO!: Class Object, NOT str.
+#     @param args: list of animal IDs. If none provided, loads all Animals for class from [tblAnimales]
+#     @param kwargs: 'initializeTags'=True initializes tags assigned to the Object.
+#     @return: list [object1, object2, ] or errorCode (str) if error.
+#     """
+#     init_tags = bool(init_tags)
+#     items = items if hasattr(items, "__iter__") else ()
+#     items = items or '*'  # items=() -> lee todos los registros de la tabla ('*' indica a getRecords() todo).
+#     try:
+#         if cls.__name__ in ('Animal', 'AssetItem', 'Asset', 'EntityObject'):
+#             retValue = f'INFO_Inp_InvalidArgument {cls}. Class is not instantiable.'
+#             krnl_logger.info(retValue)
+#             return retValue
+#     except (TypeError, AttributeError, NameError):
+#         retValue = f'INFO_Inp_InvalidArgument {cls}. Class is not instantiable.'
+#         krnl_logger.info(retValue)
+#         return retValue
+#
+#     if hasattr(cls, 'classID'):
+#         if '*' in items:
+#             itemsTable = getRecords(cls.tblObjName(), '', '', None, '*',
+#                                     fldFK_ClaseDeAnimal=cls.classID(), fldDateExit=0)  # Animales
+#         else:
+#             itemsTable = getRecords(cls.tblObjName(), '', '', None, '*',
+#                                     fldFK_ClaseDeAnimal=cls.classID(), fldDateExit=0, fldID=items)   # Animales
+#     else:
+#         itemsTable = getRecords(cls.tblObjName(), '', '', None, '*', fldID=items)  # Todos los demas
+#
+#     # # Carga y asigna listas de Actividades Programadas y Triggers para cada objeto.
+#     idCol = itemsTable.getCol('fldID')
+#     if cls in Animal.getAnimalClasses():
+#         tblRA_Desasignados = getRecords(cls.tblRAName(), '', '', None, 'fldID',
+#                                         fldFK_NombreActividad=cls.getActivitiesDict()['Caravaneo - Desasignar']) \
+#             if init_tags else None
+#     itemsList = items if items and hasattr(items, '__iter__') and not isinstance(items, str) else idCol
+#     if itemsList == idCol:
+#         pass
+#     else:
+#         itemsList = [idObj for idObj in itemsList if idObj in idCol]           # validates all items IDs.
+#
+#     items = []
+#     print(f'Loading {len(itemsList)} {cls.__name__}s from DB: ', end='')
+#
+#     try:
+#         paClass = cls.getPAClass()
+#     except (AttributeError, NameError):
+#         paClass = None    # paClass no definida para cls.
+#     RAP_col = []
+#     if paClass:
+#         # Pulls RAP records ONLY belonging to this node (fldTerminal_ID=TERMINAL_ID). Skips all replicated records.
+#         RAPRecords = getRecords(cls.tblRAPName(), '', '', None, 'fldID', fldTerminal_ID=TERMINAL_ID)
+#         if isinstance(RAPRecords, DataTable) and RAPRecords.dataLen:
+#             RAP_col = tuple(RAPRecords.getCol('fldID'))
+#
+#     for j in range(len(itemsList)):
+#         # itemObj = animalCreator.object_creator(cls, **animalsTable.unpackItem(j)) # Esta tambien funciona bien
+#         itemObj = cls(**itemsTable.unpackItem(j))  # LLAMA a __init__(): Crea Animal Obj.
+#         if itemObj.isValid and not itemObj.exitYN:
+#             itemObj.register()                  # Registra objecto en __registerDict.
+#             if paClass:   # Registers progActivity in myProgActivities dict if ProgActivities are defined for object.
+#                 # Populates myProgActivities dict ONLY with ProgActivities generated by the node (DB_ID = TERMINAL_ID).
+#                 if RAP_col:                                      # Solo ProgActivities abiertas (sin cierre).
+#                     linkPARecords = getRecords(cls.tblLinkPAName(), '', '', None, '*', fldFK=itemObj.ID,
+#                                                 fldFK_ActividadDeCierre=None, fldFK_Actividad=RAP_col)
+#                 else:
+#                     linkPARecords = getRecords(cls.tblLinkPAName(), '', '', None, '*', fldFK=itemObj.ID,
+#                                                fldFK_ActividadDeCierre=None)  # Solo ProgActivities sin cierre.
+#                 if isinstance(linkPARecords, DataTable):
+#                     fldIDCol = linkPARecords.getCol('fldID')
+#                     # Truco p/ incluir fldFK_ActividadDeCierre=0 porque parsing de getRecords() no implementa por ahora
+#                     temp = getRecords(cls.tblLinkPAName(), '', '', None, '*',fldFK=itemObj.ID,fldFK_ActividadDeCierre=0)
+#                     if isinstance(temp, DataTable) and temp.dataLen:
+#                         for i in range(temp.dataLen):
+#                             if temp.getVal(i, 'fldID') not in fldIDCol and temp.getVal(i, 'fldFK_Actividad') in RAP_col:
+#                                 linkPARecords.appendRecord(**temp.unpackItem(i))
+#                     if linkPARecords.dataLen:
+#                         paObjList = [o for o in paClass.getPARegisterDict() if o.ID in
+#                                      linkPARecords.getCol('fldFK_Actividad')]
+#                         if paObjList:
+#                             for o in paObjList:
+#                                 itemObj.registerProgActivity(o)  # myProgActivities: {paObj: __activityID}
+#                 elif isinstance(linkPARecords, str):
+#                     krnl_logger.warning(f'ERR_DBReadError: cannot read from table {cls.tblLinkPAName()}. Error: {linkPARecords}')
+#
+#             if init_tags and itemObj.__class__ in Animal.getAnimalClasses():
+#                 itemObj.tags.initializeTags(tblRA_Desasignados)
+#                 print(f'@@@@@@ {moduleName()} - bovine[{itemObj}] Category read from DB: {itemObj.category.get()}',
+#                       end=' -- ', dismiss_print=DISMISS_PRINT)
+#                 itemObj.category.compute()
+#                 print(f'After Category Update: {itemObj.category.get()}', dismiss_print=DISMISS_PRINT)
+#             # itemObj.inventory.get(mode='value')
+#             # itemObj.status.get(mode='value')
+#             items.append(itemObj)
+#         if isinstance(itemObj, Animal):
+#             itemObj.updateTimeout_bkgd()            # NO hace falta esto. Solo para testear.
+#
+#
+#     print(f'------@@@@@@@------ {moduleName()}({lineNum()}) - Total {cls.__name__}s created: {len(items)} ----------\n',
+#           dismiss_print=DISMISS_PRINT)
+#     return list(cls.getRegisterDict().values())    # return items  # Retorna lista de objetos creados, o errorCode (str)
+#
 
 
 # TODO: reescribir esta funcion, llamando a Factory methods.

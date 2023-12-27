@@ -1,5 +1,5 @@
 from krnl_abstract_class_activity import *
-from custom_types import setRecord
+from krnl_custom_types import setRecord
 from krnl_geo import Geo
 from krnl_tm import MoneyActivity
 from krnl_person import Person

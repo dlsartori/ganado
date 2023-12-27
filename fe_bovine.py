@@ -3,7 +3,7 @@ from krnl_config import time_mt, fe_logger, getEventDate, moduleName, ShutdownEx
 from krnl_object_instantiation import loadItemsFromDB
 from krnl_abstract_class_animal import Animal
 from krnl_bovine import Bovine
-from custom_types import DataTable, getRecords, setRecord
+from krnl_custom_types import DataTable, getRecords, setRecord
 from krnl_sqlite import SQLiteQuery     # Usar un objeto de esta clase para los DB queries. Implementa execute()
 from krnl_db_access import writeObj     # DB object enabling sequential writes via a write spooler. USE ONLY THIS ONE!!
 from ui_test import bovine_test

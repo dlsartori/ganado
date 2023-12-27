@@ -1,5 +1,5 @@
 from krnl_config import time_mt
-from custom_types import DataTable, getRecords, getTblName, getFldName
+from krnl_custom_types import DataTable, getRecords, getTblName, getFldName
 
 if __name__ == '__main__':
 

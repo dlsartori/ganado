@@ -1,7 +1,7 @@
 from krnl_tag_animal import *
 from krnl_config import os, lineNum, callerFunction, sessionActiveUser
 from os import path
-from custom_types import DataTable,setRecord, delRecord
+from krnl_custom_types import DataTable,setRecord, delRecord
 from random import randrange
 
 
@@ -84,9 +84,9 @@ class TagCaprine(TagAnimal):
         tagFormat = next((j for j in kwargs if str(j).lower().__contains__('tagformat')), 'Tarjeta')
         tagStatus = next((j for j in kwargs if str(j).lower().__contains__('status')), 'Alta')
         tagStatus = tagStatus if tagStatus in cls.getStatusDict() else 'Alta'
-        new_tag = TagCaprine(fldID=0, fldTagNumber=tagNumber, fldFK_TecnologiaDeCaravana=technology,
-                            fldFK_Color=tagColor, fldFK_TipoDeCaravana=tagType, fldTagMarkQuantity=marks,
-                            fldFK_FormatoDeCaravana=tagFormat, fldFK_UserID=sessionActiveUser)
+        new_tag = TagCaprine(fldID=0, fldTagNumber=tagNumber, fldFK_TagTechnology=technology,
+                            fldFK_Color=tagColor, fldFK_TagType=tagType, fldTagMarkQuantity=marks,
+                            fldFK_TagFormat=tagFormat, fldFK_UserID=sessionActiveUser)
         idTag = setRecord('tblCaravanas', **new_tag.getElements)
         new_tag.ID = idTag  # Actualiza Tag ID con valor obtenido de setRecord()
         cls.register(new_tag)  # TODO: SIEMPRE registrar Tag (al igual que Animal). __init__() NO registra los objetos.

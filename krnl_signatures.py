@@ -1,5 +1,5 @@
 from krnl_cfg import *
-from custom_types import Activity
+from krnl_custom_types import Activity
 
 ACTIVITY_LOWER_LIMIT = 15
 ACTIVITY_UPPER_LIMIT = 30

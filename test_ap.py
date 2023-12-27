@@ -1,5 +1,5 @@
 from krnl_cfg import *
-from custom_types import DataTable, getRecords, setupArgs
+from krnl_custom_types import DataTable, getRecords, setupArgs
 from krnl_sqlite import SQLiteQuery, getTableInfo
 # from krnl_cfg import moduleName, callerFunction
 # from operator import attrgetter

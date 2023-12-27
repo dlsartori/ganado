@@ -17,12 +17,98 @@ class Config:
 class Bovine(Mammal):
     # __objClass = 5
     # __objType = 1
-    __genericAnimalID = None
+    # __genericAnimalID = None
     __moduleRunning = 1   # Flag que indica si el modulo de la clase de Animal se esta ejecutando. TODO: Ver como setear
     _animalClassName = 'Vacuno'
     _kindOfAnimalID = 1             # TODO(cmt): 1:'Vacuno', 2:'Caprino', 3:'Ovino', 4:'Porcino', 5:'Equino'.
 
+    @classmethod
+    def animalClassID(cls):
+        return cls._kindOfAnimalID
+
+
+    # TODO(cmt): __registerDict is deprecated.
     __registerDict = {}  # {idAnimal: objAnimal}-> Registro General de Animales: Almacena Animales de la clase
+
+
+    # TODO(cmt): dictionaries to manage Bovine object queries, handling Duplicates management behind the scenes.
+    _active_uids_dict = {}                 # {fldObjectUID: fld_Duplication_Index}
+    _active_duplication_index_dict = {}    # {fld_Duplication_Index: set(fldObjectUID, dupl_uid1, dupl_uid2, ), }
+
+    @classmethod
+    def _init_uid_dicts(cls):
+        """
+        Initializes uid dicts upon system start up and when the dict_update flag is set for the class by SQLite.
+        Method is run in the __init_subclass__() routine in EntityObject class during system start, and by
+        _processDuplicates() run by background functions.
+        @return: None
+        """
+        sql = f'SELECT * from "{cls.tblObjDBName()}" WHERE ("{getFldName(cls.tblObjName(), "fldDateExit")}" IS NULL OR '\
+              f'"{getFldName(cls.tblObjName(), "fldDateExit")}" == 0) AND ' \
+              f'"{getFldName(cls.tblObjName(), "fldFK_ClaseDeAnimal")}" == {cls.animalClassID()}; '
+        temp = dbRead(cls.tblObjName(), sql)
+        if not isinstance(temp, DataTable):
+            val = f"ERR_DBAccess cannot read from table {cls.tblObjDBName()} internal uid_dicts no initialized. " \
+                  f"System cannot operate."
+            krnl_logger.warning(val)
+            raise DBAccessError(val)
+        if temp:
+            idx_uid = temp.getFldIndex("fldObjectUID")
+            col_uid = [j[idx_uid] for j in temp.dataList]
+            idx_dupl = temp.getFldIndex("fld_Duplication_Index")
+            col_duplication_index = [j[idx_dupl] for j in temp.dataList]          # temp.getCol("fld_Duplication_Index")
+            if col_uid:         # and len(col_uid) == len(col_duplication_index):  This check probably not needed.
+                # 1. initializes _active_uids_dict
+                cls._active_uids_dict = dict(zip(col_uid, col_duplication_index))
+
+                # 2. Initializes __active_Duplication_Index_dict ONLY FOR DUPLICATE uids.
+                # An EMPTY _active_duplication_index_dict means there are NO duplicates for that uid in the db table.
+                for item in col_duplication_index:          # item is a _Duplication_Index value.
+                    if col_duplication_index.count(item) > 1:
+                        # Gets all the uids associated to _Duplication_Index
+                        uid_list = [col_uid[j] for j, val in enumerate(col_duplication_index) if val == item]
+                        # ONLY DUPLICATE ITEMS HERE (_Duplication_Index count > 1), to make search more efficient.
+                        cls._active_duplication_index_dict[item] = tuple(uid_list)
+        # print(f'_active_uids_dict = {cls._active_uids_dict}')
+        return None
+
+    @classmethod
+    def get_active_uids(cls):
+        return cls._active_uids_dict        # {animal_uid: duplication_index}
+
+
+    # "reduced" memory data structure to hold critical and small data for ALL active objects. Initialized and managed
+    # similarly to _active_uids_dict.
+    _memory_data = {}       # {uid: {last_inventory: val, }, }
+
+    @classmethod
+    def __init_memory_data(cls):
+        if cls._active_uids_dict:
+            for uid in cls._active_uids_dict:
+                cls._memory_data[uid] = {}      # Empty dict to store memory data for uid.
+                o = cls.getObject(uid)
+                if o:
+                    if USE_DAYS_MULT:
+                        # Sets the 1st inventory for simulation purposes. 1 sec = 60 days ago from time_mt() value.
+                        val = time_mt('dt') - timedelta(seconds=1, microseconds=0)
+                    else:
+                        val = o.inventory.get(mode='value')     # 'value' -> forces data retrieval from db.
+                    cls._memory_data[uid]['last_inventory'] = val
+                    cls._memory_data[uid]['last_category'] = o.category.compute(enforce_computation=True)
+        print(f'MEMORY DATA ({len(cls._memory_data)} items): {cls._memory_data}')
+        return None
+
+    # @classmethod
+    # def get_memory_data(cls, uid):
+    #     """ Returns the value stored for uid. A dict with values or an empty dict.
+    #     Calling function must further process this returned dict.
+    #     """
+    #     return cls._memory_data.get(uid, {})         # {uid: {last_inventory: val, }, }
+    #
+    #
+    # @classmethod
+    # def get_memory_data_dict(cls):
+    #     return cls._memory_data            # {uid: {last_inventory: val, }, }
 
     # Defining _activityObjList will call  _creatorActivityObjects() in EntityObject.__init_subclass__().
     _activityObjList = []  # List of Activity objects created by factory function.
@@ -77,6 +163,8 @@ class Bovine(Mammal):
             # 0: Define en DB una Actividad que aplica a TODAS las clases de Animales
             __bovineActivitiesDict[temp.dataList[j][1]] = temp.dataList[j][0]
             __isInventoryActivity[temp.dataList[j][1]] = temp.dataList[j][2]
+    del temp
+
 
     @property
     def activities(self):           # @property activities es necesario para las llamadas a obj.outerObject.
@@ -84,27 +172,26 @@ class Bovine(Mammal):
 
     def register(self):
         """
-        Inserts Bovine Object and ID into Bovine.__registerDict
-        @param external: Signals whether the object being registered is locally created or replicated from another db.
+        Creates entry for object in __memory_data dictionary.
         @return: Inserted object. None if one tries to register a Generic or External animal.
         """
         if self.mode.lower() in ('regular', 'substitute', 'dummy'):  # TODO(cmt): POR AHORA, generic y external no van
-            self.__registerDict[self.ID] = self
-            # if external and self.mode.lower() not in 'dummy':
-            #     self._new_local_fldIDs.append(self.recordID)     # Used to drive the duplicate object detection logic.
+            # self.__registerDict[self.ID] = self
+            self.get_memory_data()[self.ID] = {}  # Creates empty entry to be later populated with 'last_inventory',etc.
             return self
         return None
 
     def unRegister(self):  # Remueve obj .__registerDict.
         """
-        Removes object from .__registerDict
+        Removes object entry from __memory_data dictionary.
         @return: removed object ID if successful. None if object not found in dict.
         """
-        try:
-            self._fldID_list.remove(self.recordID)      # removes fldID from _fldID_list to keep integrity of structure.
-        except ValueError:
-            pass
-        return self.__registerDict.pop(self.ID, None)  # Retorna False si no encuentra el objeto
+        return self.get_memory_data().pop[self.ID]
+        # try:
+        #     self._fldID_list.remove(self.recordID)   # removes fldID from _fldID_list to keep integrity of structure.
+        # except ValueError:
+        #     pass
+        # return self.__registerDict.pop(self.ID, None)  # Retorna False si no encuentra el objeto
 
     @classmethod
     def getActivitiesDict(cls):
@@ -115,10 +202,12 @@ class Bovine(Mammal):
         return cls.__isInventoryActivity
 
     temp1 = getRecords('tblAnimalesCategorias', '', '', None, '*', fldFK_ClaseDeAnimal=_kindOfAnimalID)
-    __categories = {}  # {Category Name: ID_Categoria, }
+    __categories = {}  # {Category Name: ID_Categoria, } List of ALL Categories for animalClassID
     if temp1.dataLen:
         for j in range(temp1.dataLen):
             __categories[temp1.getVal(j, 'fldName')] = temp1.getVal(j, 'fldID')
+    del temp1
+
 
     @property
     def categories(self):
@@ -139,10 +228,10 @@ class Bovine(Mammal):
     __setNovilloByAge = 0  # TODO: leer este parametro de DB.
     __AGE_LIMIT_BOVINE = 20 * 365  # TODO: leer este parametro de DB.
 
-    __ageLimits = {'Ternera': __edadLimiteTernera, 'Vaquillona': __edadLimiteVaquillona, 'Vaca': __edadLimiteVaca,
-                   'Ternero': __edadLimiteTernero, 'Torito': __edadLimiteTorito, 'Novillito': __edadLimiteNovillito,
-                   'Novillo': __edadLimiteNovillo, 'Toro': __edadLimiteToro, 'Bovine': __AGE_LIMIT_BOVINE,
-                   'Vacuno': __AGE_LIMIT_BOVINE}
+    __ageLimits = {'ternera': __edadLimiteTernera, 'vaquillona': __edadLimiteVaquillona, 'vaca': __edadLimiteVaca,
+                   'ternero': __edadLimiteTernero, 'torito': __edadLimiteTorito, 'novillito': __edadLimiteNovillito,
+                   'novillo': __edadLimiteNovillo, 'toro': __edadLimiteToro, 'bovine': __AGE_LIMIT_BOVINE,
+                   'vacuno': __AGE_LIMIT_BOVINE}
 
     @classmethod
     def getAgeLimits(cls):
@@ -161,51 +250,11 @@ class Bovine(Mammal):
 
 
     def __init__(self, *args, **kwargs):
-
-        # class ArgsBovine(BaseModel):        # pydantic Class for argument parsing and validation
-        #     kwargs: dict
-        #     # strip_str: constr(strip_whitespace=True)
-        #     # lower_str: constr(to_lower=True)
-        #
-        #     @classmethod
-        #     # @field_validator('kwargs', '', check_fields=False)
-        #     @validator('kwargs', pre=False, each_item=True, allow_reuse=True, check_fields=False)
-        #     def validate_kwargs(cls, argsDict):
-        #         myDOB = None
-        #         myfldID = None
-        #         # lower_keys = [str(j).strip().lower() for j in argsDict]
-        #         if {'fldID', 'fldDOB'}.issubset(argsDict):
-        #             # myfldID = next((argsDict[j] for j in argsDict if 'fldid' in j.lower()), None)
-        #             myDOB = kwargs.get('fldDOB', '')
-        #             if myDOB:
-        #                 if not isinstance(myDOB, datetime):
-        #                     try:
-        #                         myDOB = datetime.strptime(myDOB, fDateTime)
-        #                     except(TypeError, ValueError):
-        #                         print(f'ERR_INP_Invalid argument DOB: {myDOB}')
-        #                         raise ValueError(f'ERR_INP_InvalidArgument: Date of Birth {myDOB} - '
-        #                                          f'{moduleName()}({lineNum()})')
-        #             castr = next((argsDict[j] for j in argsDict if 'flagcastrado' in j.lower()), 0)
-        #             if castr in (0, 1):
-        #                 argsDict['fldFlagCastrado'] = castr  # Si fldFlagCastrado no esta en kwargs lo crea y setea a 0
-        #             else:
-        #                 argsDict['fldFlagCastrado'] = valiDate(castr, 1)  # valida fecha. Si es incorrecta, setea 1
-        #             mode = str(next((kwargs[j] for j in kwargs if 'mode' in str(j).lower()), None)).lower()
-        #             if mode not in Animal.getAnimalModeDict():
-        #                 raise ValueError(f'ERR_UI_InvalidArgument: Animal Mode {mode} not valid. - '
-        #                                  f'{moduleName()}({lineNum()})')
-        #             else:
-        #                 return argsDict
-        #         else:
-        #             raise ValueError(f'ERR_UI_InvalidArgument: ID_Animal and/or Animal DOB are missing. '
-        #                              f'kwargs:{kwargs} / argsDict: {argsDict} / ID: {myfldID} / dob: {myDOB}')
-
         try:
-            # user = ArgsBovine(kwargs=kwargs)
             kwargs = self.validate_arguments(kwargs)
         except (TypeError, ValueError) as e:
             krnl_logger.info(f'{e} - Object not created!.')
-            del self  # Removes invalid/incomplete Bovine object
+            # del self  # Removes invalid/incomplete Bovine object
             return
 
         mode = next((str(kwargs[j]).lower().strip() for j in kwargs if 'mode' in str(j).lower()), None)
@@ -216,7 +265,7 @@ class Bovine(Mammal):
 
         self.__flagCastrado = kwargs.get('fldFlagCastrado')
         self.__comment = kwargs.get('fldComment', '')
-        kwargs['memdata'] = True  # Habilita datos en memoria (_getCategory, getStatus, _getInventory) en EntityObject
+        kwargs['memdata'] = True  # Habilita datos en memoria (last_inventory data) en EntityObject
 
         super().__init__(*args, **kwargs)
 
@@ -255,58 +304,58 @@ class Bovine(Mammal):
             return argsDict
 
 
-    @classmethod
-    def defineCategory(cls, dob, mf: str, **kwargs):
-        """
-        Produces a Category for an Animal when DOB, MF are passed. IMPORTANT: One specific method for each Animal Class.
-        NO DATATABLES PASSED or updated. It just updates the Animal category and returns the new value to the caller.
-        kwargs: 'enforce'=True enforces category regardless of dob.
-        @return: idAnimal if category changed. None if category is unchanged.
-        """
-        if isinstance(dob, (int, float)):
-            pass
-        elif isinstance(dob, str):
-            dob = time.strptime(dob, '%Y-%m-%d %H:%M:%S.%f')
-        elif isinstance(dob, datetime):
-            dob = dob.timestamp()
-        else:
-            retValue = f'INFO_Inp_InvalidArguments: {dob}'
-            krnl_logger.info(retValue, stack_info=True)
-            return retValue
-
-        ageDays = (time_mt() - dob) / SPD
-        if ageDays > cls.ageLimit(Bovine.animalClass) and not kwargs.get('enforce'):
-            retValue = f'INFO_Inp_InvalidArgument: Animal age ({ageDays/365} yrs) out of limits '
-            krnl_logger.info(retValue, stack_info=True)     # enforce=True -> Ignora este control de edad.
-            return retValue
-
-        if mf.upper().__contains__('F'):
-            if ageDays < cls.ageLimit('Ternera'):
-                # if Bovine.__setVaquillonaByWeight:  # TODO: Cambiar Categoria por peso:En "MEDICIONES",aqui no.
-                #     if obj.getWeight() > == cls.__weightLimitTernera:
-                #         category = 'Vaquillona'
-                # if obj.parturition.getTotal() == 1  # Si total Pariciones = 1, es Vaquillona.
-                # category = 'Vaquillona'
-                categoryName = 'Ternera'
-            elif ageDays < cls.ageLimit('Vaquillona'):
-                categoryName = 'Vaquillona'
-            else:
-                categoryName = 'Vaca'
-        else:
-            if not kwargs.get('castration'):
-                categoryName = 'Novillito' if ageDays < Bovine.ageLimit('Novillito') else 'Novillo'
-            else:
-                if ageDays < cls.ageLimit('Ternero'):
-                    categoryName = 'Ternero'
-                elif ageDays < cls.ageLimit('Torito'):
-                    categoryName = 'Torito'
-                elif ageDays > cls.ageLimit('Novillito'):  # and self.outerObject.setNovilloByAge:
-                    categoryName = 'Novillo'
-                else:
-                    categoryName = 'Toro'
-
-        retValue = categoryName
-        return retValue
+    # @classmethod
+    # def defineCategory(cls, dob, mf: str, **kwargs):
+    #     """
+    #     Produces a Category for an Animal when DOB, MF are passed. IMPORTANT: One specific method for each Animal Class.
+    #     NO DATATABLES PASSED or updated. It just updates the Animal category and returns the new value to the caller.
+    #     kwargs: 'enforce'=True enforces category regardless of dob.
+    #     @return: idAnimal if category changed. None if category is unchanged.
+    #     """
+    #     if isinstance(dob, (int, float)):
+    #         pass
+    #     elif isinstance(dob, str):
+    #         dob = time.strptime(dob, '%Y-%m-%d %H:%M:%S.%f')
+    #     elif isinstance(dob, datetime):
+    #         dob = dob.timestamp()
+    #     else:
+    #         retValue = f'INFO_Inp_InvalidArguments: {dob}'
+    #         krnl_logger.info(retValue, stack_info=True)
+    #         return retValue
+    #
+    #     ageDays = (time_mt() - dob) / SPD
+    #     if ageDays > cls.ageLimit(Bovine.animalClass) and not kwargs.get('enforce'):
+    #         retValue = f'INFO_Inp_InvalidArgument: Animal age ({ageDays/365} yrs) out of limits '
+    #         krnl_logger.info(retValue, stack_info=True)     # enforce=True -> Ignora este control de edad.
+    #         return retValue
+    #
+    #     if mf.upper().__contains__('F'):
+    #         if ageDays < cls.ageLimit('Ternera'):
+    #             # if Bovine.__setVaquillonaByWeight:  # TODO: Cambiar Categoria por peso:En "MEDICIONES",aqui no.
+    #             #     if obj.getWeight() > == cls.__weightLimitTernera:
+    #             #         category = 'Vaquillona'
+    #             # if obj.parturition.getTotal() == 1  # Si total Pariciones = 1, es Vaquillona.
+    #             # category = 'Vaquillona'
+    #             categoryName = 'Ternera'
+    #         elif ageDays < cls.ageLimit('Vaquillona'):
+    #             categoryName = 'Vaquillona'
+    #         else:
+    #             categoryName = 'Vaca'
+    #     else:
+    #         if not kwargs.get('castration'):
+    #             categoryName = 'Novillito' if ageDays < Bovine.ageLimit('Novillito') else 'Novillo'
+    #         else:
+    #             if ageDays < cls.ageLimit('Ternero'):
+    #                 categoryName = 'Ternero'
+    #             elif ageDays < cls.ageLimit('Torito'):
+    #                 categoryName = 'Torito'
+    #             elif ageDays > cls.ageLimit('Novillito'):  # and self.outerObject.setNovilloByAge:
+    #                 categoryName = 'Novillo'
+    #             else:
+    #                 categoryName = 'Toro'
+    #
+    #     retValue = categoryName
+    #     return retValue
 
 # ---------------------------------------------------- End Bovine class --------------------------------------------- #
 
@@ -314,7 +363,7 @@ class Bovine(Mammal):
 #     Bovine.registerKindOfAnimal()       # Registra tipo de Animal en diccionario en clase Animal.
 
 # Lista de todos los objetos Bovine, obtenidos de __registerDict en cada llamada a bovines
-def bovine():
-    return list(Bovine.getRegisterDict().values())
+# def bovine():
+#     return list(Bovine.getRegisterDict().values())
 
 

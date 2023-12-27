@@ -1,4 +1,5 @@
 *.rar
+*.zip
 *.log
 *.db-shm
 *.db-wal
@@ -7,10 +8,11 @@ GanadoSQLite.db
 GanadoSQLite*.db
 GanadoSQLite_DS.db
 temp.py
-
+*.csv
 # Drawio
 *.bkp
 *.dtmp
+temp/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

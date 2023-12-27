@@ -1,7 +1,7 @@
 import sys
-from krnl_db_access import writeObj, init_db_replication_triggers, SqliteQueueDatabase
-from custom_types import close_db_writes
-from krnl_threading import REPORT_PERIOD, IntervalFunctions, dailyFunctions, FrontEndHandler
+from krnl_db_access import writeObj, SqliteQueueDatabase
+from krnl_custom_types import close_db_writes
+from krnl_threading import REPORT_PERIOD, IntervalFunctions, dailyFunctions, FrontEndHandler, TEST_MULTIPLIER
 from krnl_object_instantiation import loadItemsFromDB
 from krnl_async_buffer import AsyncBuffer       # Used to issue stop() to all buffers writers.
 from krnl_bovine import Bovine, Animal
@@ -24,15 +24,16 @@ def moduleName():
 if __name__ == '__main__':
     shortList = (0, 1, 4, 8, 11, 18, 27, 32, 130, 172, 210, 244, 280, 398, 41, 61, 92, 363, 368, 372)  # ID=0 no existe.
     bovines = loadItemsFromDB(Bovine, items=shortList, init_tags=True)  # Abstract Factory funca lindo aqui...
+    Bovine._animal_items = [j.ID for j in bovines]  # Sends the list of items for running updateTimeout_bkgd()
     reportPeriod = REPORT_PERIOD   # En dias. Tiempo para presentar una nueva linea en pantalla
 
     krnl_logger.info(f'******* switchinterval is set to {sys.getswitchinterval()} seconds.')
     # print(f'ANIMAL REGISTER DICT: {Bovine.getRegisterDict()}')
     people = loadItemsFromDB(Person)
-    print(f'About Classes. person is: {people[0].__class__.__name__} / Animal: {bovines[0].__class__.__name__} / '
-          f'isinstance(bovine[0], Animal): {isinstance(bovines[0], Animal)}')
-    krnl_logger.info(f'======================================= End loadItemsFromDB =================================='
-                     f'=========')
+    # print(f'About Classes. person is: {people[0].__class__.__name__} / Animal: {bovines[0].__class__.__name__} / '
+    #       f'isinstance(bovine[0], Animal): {isinstance(bovines[0], Animal)}')
+    krnl_logger.info(f'================= End loadItemsFromDB - Animal registerDict size: {len(Bovine.getRegisterDict())}'
+                     f'===========================================================')
 
     initialCat = {}
     t1 = t2 = 0  # medidores de tiempo del lazo for.
@@ -63,10 +64,10 @@ if __name__ == '__main__':
         t2e = perf_counter()
         t2 += t2e-t2s
         print(f'.', end='')
-        initialCat[j.ID] = j.category.get()
+        initialCat[j] = j.category.get()
 
     print(f'\nMAIN THREAD>   inventory.set() avg time (msec): {t1/len(bovines)*1000}')
-    print(f'MAIN THREAD>  category.set() avg time (msec): {t2 / len(bovines)*1000}')
+    # print(f'MAIN THREAD>  category.set() avg time (msec): {t2 / len(bovines)*1000}')
     print(f'Initial Categories: {initialCat}')
     krnl_logger.info(f'\n================================= End Category, DOB Setup ==================================')
     print(f'\n')
@@ -88,7 +89,7 @@ if __name__ == '__main__':
         pass
 
     print(f'\n...INTERVALTIMER THREADS...')
-    print(f'MAIN THREAD> Years simulated: {sleepAmount * DAYS_MULT / 365} / 1 second = {DAYS_MULT} days / '
+    print(f'MAIN THREAD> Years simulated: {sleepAmount * DAYS_MULT / 365 * TEST_MULTIPLIER} / 1 second = {DAYS_MULT} days / '
           f'MAIN THREAD> New screen line = {reportPeriod} days.')
     print(f'MAIN THREAD> sleepAmount: {sleepAmount} seconds')
     print(f'MAIN THREAD> DB Writes from frontend: inventory.set(): ')
@@ -108,7 +109,7 @@ if __name__ == '__main__':
         bovines[idx].inventory.set()      # Escribe inventario de animal ID=4 desde Main Thread
         print(f'\n*************************** FRONTEND: inventory #{i+1:2} recorded for AnimalID={bovines[idx]} **********************')
         print(f'**************************************************************************************************\n')
-        sleep(sleepAmount/n)
+        sleep(sleepAmount * TEST_MULTIPLIER/n)            # sleepAmount DEFINED IN krnl_config.py
     elapsed = time_mt() - startTime
     print(f'MAIN THREAD> Termino sleep de main thread...///')
     print(f'\n~~~~~~~~~~~~~~~~~~~ Total number of threads running: {threading.active_count()} ~~~~~~~~~~~~~~~~~~~~~ ')

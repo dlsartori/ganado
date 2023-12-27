@@ -1,11 +1,12 @@
 from krnl_abstract_class_activity import *
-from krnl_abstract_class_prog_activity import ProgActivity, ActivityTrigger
+from krnl_abstract_class_prog_activity import ProgActivity
 from krnl_geo_new import Geo
 from krnl_tag import Tag
 from krnl_tag_bovine import TagAnimal, TagBovine
 from krnl_person import Person
-from custom_types import setupArgs, setRecord, delRecord
+from krnl_custom_types import setupArgs, setRecord, delRecord
 from krnl_config import krnl_logger, compare_range
+from krnl_sqlite import getTblName, getFldName
 import threading
 
 def moduleName():
@@ -36,13 +37,32 @@ class AnimalActivity(Activity):     # Abstract Class (no lleva ningun instance a
 
     # Class Attributes: Tablas que son usadas por todas las instancias de InventoryActivityAnimal
     __tblRAName = 'tblAnimalesRegistroDeActividades'
+    __tblRADBName = getTblName(__tblRAName)
     __tblObjectsName = 'tblAnimales'     # Si hay que cambiar estos nombres usar InventoryActivityAnimal.__setattr__()
+    __tblObjectDBName = getTblName(__tblObjectsName)
     __tblLinkName = 'tblLinkAnimalesActividades'
     __tblDataCategoryName = 'tblDataAnimalesCategorias'
     __tblProgStatusName = 'tblDataActividadesProgramadasStatus'       # __tblPADataStatusName
     __tblProgActivitiesName = 'tblDataProgramacionDeActividades'
     __tblPATriggersName = 'tblAnimalesActividadesProgramadasTriggers'
     __lock = Lock()
+
+    @classmethod
+    def tblObjDBName(cls):
+        return cls.__tblObjectDBName
+
+    @classmethod
+    def tblRADBName(cls):
+        return cls.__tblRADBName
+
+    @classmethod
+    def tblRAName(cls):
+        return cls.__tblRAName
+
+    @classmethod
+    def tblObjName(cls):
+        return cls.__tblObjectsName
+
 
     temp = getRecords('tblAnimalesActividadesNombres', '', '', None, 'fldID', 'fldName', 'fldFlag',
                       'fldFK_ClaseDeAnimal', 'fldFlagPA', 'fldPAExcludedFields', 'fldDecoratorName','fldTableAndFields',
@@ -56,7 +76,7 @@ class AnimalActivity(Activity):     # Abstract Class (no lleva ningun instance a
 
     # Variables para logica de manejo de objetos repetidos/duplicados.
     _fldID_list = []  # List of all active records pulled by getRecords() from tblAnimales.
-    _fldID_exit_list = []  # List of all all records with fldExitDate > 0, updated in each call to processReplicated().
+    _fldID_exit_list = []  # List of all all records with fldExitDate > 0, updated in each call to _processDuplicates().
     _object_fldUPDATE_dict = {}  # {fldID: fldUPDATE_counter, }        Keeps a dict of uuid values of fldUPDATE fields
     # _RA_fldUPDATE_dict = {}  # {fldID: fldUPDATE_counter, }      # TODO: ver si este hace falta.
     # _RAP_fldUPDATE_dict = {}  # {fldID: fldUPDATE_counter, }      # TODO: ver si este hace falta.
@@ -113,6 +133,9 @@ class AnimalActivity(Activity):     # Abstract Class (no lleva ningun instance a
         # {Nombre Actividad: excluded_fields,}
         _activityExcludedFieldsClose[temp.dataList[j][1]] = set(temp.dataList[j][5] or set()).union(__classExcludedFieldsClose)
 
+    del temp
+    del temp0
+
 
     def __new__(cls, *args, **kwargs):
         if cls is AnimalActivity:
@@ -167,7 +190,7 @@ class AnimalActivity(Activity):     # Abstract Class (no lleva ningun instance a
         Closing Activity for the ProgActivities it is checked against.
         @return: dict with updated execution values for the call. ONLY REQUIRED FIELDS MUST BE INCLUDED. NOTHING ELSE!!!
         """
-        kwargs.update({'fldFK_ClaseDeAnimal': self.outerObject.animalClassID})
+        kwargs.update({'fldFK_ClaseDeAnimal': self.outerObject.animalClassID()})
         return kwargs
                 # 'execution_date': execution_date,
                 # 'fldFK_ClaseDeAnimal': self.outerObject.animalClassID,
@@ -182,7 +205,7 @@ class AnimalActivity(Activity):     # Abstract Class (no lleva ningun instance a
     # ------------ Funciones de Categoria, generales para TODAS las clases de Animal. Vamos empezando por aqui,... ---#
 
     def _setCategory(self, *args, excluded_fields=None, execute_fields=None, **kwargs):
-        """
+        """         TODO(cmt): THIS FUNCTION SHOULD BE DEPRECATED FOR ALL ANIMAL CLASSES 22-DEC-23.
         @param args: DataTable objects with obj_data to write to DB
         @param kwargs:  'enforce'=True: forces the Category val irrespective of __statusPermittedDict conditions
                          'categoryID': Category number to set, if Category number is not passed via tblData
@@ -190,93 +213,100 @@ class AnimalActivity(Activity):     # Abstract Class (no lleva ningun instance a
                  None if record not created (same category)
                  errorCode (str) if invalid category
         """
-        if not self.outerObject:
-            return f'ERR_SYS_Invalid outerObject {callerFunction()}.'
-        # reentryLevel = kwargs.get('reentry_level', 0)  # toma valor pasado por el wrapper (si se llamo via wrapper)
-
+        outerObj = self.outerObject
         tblData = next((j for j in args if j.tblName == self._tblDataName), DataTable(self._tblDataName))
         # Procesa Categoria Y valida categoryID: Todo este mambo es para aceptar categorias como nombre y/o como ID
         categoryID = tblData.getVal(0, 'fldFK_Categoria')
-        if categoryID not in self.outerObject.categories.values():
+        if categoryID not in outerObj.categories.values():
             categID = removeAccents(next((kwargs[j] for j in kwargs if 'categ' in j.lower()), None))
-            categoryID = categID if categID in self.outerObject.categories.values() else \
-                next((self.outerObject.categories[j] for j in self.outerObject.categories if removeAccents(str(j))
+            categoryID = categID if categID in outerObj.categories.values() else \
+                next((outerObj.categories[j] for j in outerObj.categories if removeAccents(str(j))
                       == categID), None)
         if categoryID is None:
             retValue = f'ERR_INP_ArgumentsNotValid: Category not valid or missing. {callerFunction(getCallers=True)}'
             krnl_logger.info(retValue)
             print(f'{moduleName()}({lineNum()} - {retValue}', dismiss_print=DISMISS_PRINT)
-            # self.outerObject = None  # Removes object from list. Enables recursion/reentry.
             return retValue
+
+        lastCategory = outerObj.get_memory_data().get('last_category')  # Gets current category for outerObject.
         enforce = next((bool(kwargs[j]) for j in kwargs if 'enforce' in j.lower()), None)
-        # Prioridad eventDate:    1: fldDate(tblData); 2: kwargs(fecha valida); 3: timeStamp.
-        timeStamp = time_mt('datetime')
-        eventDate = getEventDate(tblDate=tblData.getVal(0, 'fldDate'), timeStamp=timeStamp, **kwargs)
-        tblData.setVal(0, fldDate=eventDate)
-
         # Aqui abajo, self accede al diccionario __permittedFrom de la clase de Animal correcta.
-        if categoryID and (categoryID in self.permittedFrom()[str(self.outerObject.lastCategoryID)] or enforce):
-            flagExecInstance = self.outerObject.lastCategoryID != categoryID  # Flag to invoke PA creation method.
-            tblRA = next((j for j in args if j.tblName == self._tblRAName), DataTable(self._tblRAName))
-            tblLink = next((j for j in args if j.tblName == self._tblLinkName), DataTable(self._tblLinkName))
-            activityID = tblRA.getVal(0, 'fldFK_NombreActividad')
-            activityID = activityID if activityID else self._activityID
-            tblRA.setVal(0, fldFK_NombreActividad=activityID)
-            tblData.setVal(0, fldFK_Categoria=categoryID, fldComment='')
+        if categoryID and (categoryID in self.permittedFrom()[f"{lastCategory}"] or enforce):
+            outerObj.get_memory_data()['last_category'] = categoryID
 
-            if self.outerObject.supportsMemData:  # parametros para actualizar variables en memoria se pasan en
-                tblData.setVal(0, fldMemData=1)  # Activa flag Memory Data en el registro que se escribe en DB
-            idActividadRA = self._createActivityRA(tblRA, tblLink, tblData, **kwargs)
-            retValue = idActividadRA
+        return categoryID
 
-            if isinstance(retValue, int):
-                """ En caso e reentry solo escribira en memoria el valor de eventDate mas alto disponible """
-                with self.__lock:  # lock: the whole block must be atomic to ensure integrity of what's written to mem.
-                    if self.outerObject.lastCategoryID:
-                        if self.outerObject._lastCategoryID[1] < eventDate:
-                            # Writes items to memory list only if data in memory is from a date EARLIER than eventDate.
-                            self.outerObject.lastCategoryID = [categoryID, eventDate]
-                    else:
-                        self.outerObject.lastCategoryID = [categoryID, eventDate]  # Esta linea debiera ser atomica (Espero)
 
-                # Verificar si hay hay que cerrar alguna(s) PA con con esta actividad como "cerradora".
-                if self._supportsPA:
-                    excluded_fields = set(excluded_fields) if isinstance(excluded_fields,
-                                                                         (list, set, tuple, dict)) else set()
-                    execute_date = self.outerObject._lastCategoryID[1]  # Gets the internal exec. date for lastCategory.
-                    if isinstance(retValue, int) and self._supportsPA:
-                        executeFields = self._classExecuteFields(execution_date=execute_date,
-                                                                 category=self.outerObject.lastCategoryID)
-                        if execute_fields and isinstance(execute_fields, dict):
-                            executeFields.update(execute_fields)  # execute_fields adicionales, si se pasan.
-                        self._paMatchAndClose(retValue, execute_fields=executeFields, excluded_fields=excluded_fields,
-                                    **kwargs)  # TODO(cmt): This call is executed asynchronously by another thread
 
-                        # Updates cols in tblLink, so that external nodes can access Execute Data, Excluded Fields.
-                        fldID_Link = tblLink.getVal(0, 'fldID')
-                        if fldID_Link:
-                            setRecord(self._tblLinkName, fldID=fldID_Link, fldExecuteData=executeFields,
-                                      fldExcludedFields=excluded_fields)
-
-                        print(f'\n_________This thread is: {threading.current_thread().name}____________ _'
-                              f'setCategory _matchAndClose. outerObject: {self.outerObject.ID}')
-
-                if flagExecInstance:
-                    self._paCreateExecInstance(outer_obj=self.outerObject)     # This one also goes to a queue.
-            else:
-                retValue = f'ERR_Sys_Object not valid or activity not defined: {retValue}- {callerFunction()}'
-                krnl_logger.info(retValue)
-                print(f'{moduleName()}({lineNum()} - {retValue}', dismiss_print=DISMISS_PRINT)
-
-        elif categoryID == self.outerObject.lastCategoryID:
-            retValue = True   # -> True si no hay cambio de Categoria, porque no se genero idActividadRA.
-        else:
-            retValue = f'ERR_Sys_ObjectNotValid or ActivityNotDefined - ID: {self.outerObject.ID} current Category:' \
-                       f'{self.outerObject.lastCategoryID}; required Category:{categoryID}'
-            krnl_logger.warning(f'{moduleName()}({lineNum()}  - {retValue}')
-            print(f'{moduleName()}({lineNum()}  - {retValue}', dismiss_print=DISMISS_PRINT)
-
-        return retValue
+        # # Prioridad eventDate:    1: fldDate(tblData); 2: kwargs(fecha valida); 3: timeStamp.
+        # timeStamp = time_mt('datetime')
+        # eventDate = getEventDate(tblDate=tblData.getVal(0, 'fldDate'), timeStamp=timeStamp, **kwargs)
+        # tblData.setVal(0, fldDate=eventDate)
+        # lastCategory = self.outerObject.category.get()  # No problem with this recursive call on category.
+        # # Aqui abajo, self accede al diccionario __permittedFrom de la clase de Animal correcta.
+        # if categoryID and (categoryID in self.permittedFrom()[f"{lastCategory}"] or enforce):
+        #     flagExecInstance = (lastCategory != categoryID)  # Flag to invoke PA creation method.
+        #     tblRA = next((j for j in args if j.tblName == self._tblRAName), DataTable(self._tblRAName))
+        #     tblLink = next((j for j in args if j.tblName == self._tblLinkName), DataTable(self._tblLinkName))
+        #     activityID = tblRA.getVal(0, 'fldFK_NombreActividad')
+        #     activityID = activityID if activityID else self._activityID
+        #     tblRA.setVal(0, fldFK_NombreActividad=activityID)
+        #     tblData.setVal(0, fldFK_Categoria=categoryID, fldComment='')
+        #
+        #     # if self.outerObject.supportsMemData:  # parametros para actualizar variables en memoria se pasan en
+        #     #     tblData.setVal(0, fldMemData=1)  # Activa flag Memory Data en el registro que se escribe en DB
+        #     idActividadRA = self._createActivityRA(tblRA, tblLink, tblData, **kwargs)
+        #     retValue = idActividadRA
+        #
+        #     if isinstance(retValue, int):
+        #         # """ En caso e reentry solo escribira en memoria el valor de eventDate mas alto disponible """
+        #         # with self.__lock:  # lock: the whole block must be atomic to ensure integrity of what's written to mem.
+        #         #     if self.outerObject.lastCategoryID:
+        #         #         if self.outerObject._lastCategoryID[1] < eventDate:
+        #         #             # Writes items to memory list only if data in memory is from a date EARLIER than eventDate.
+        #         #             self.outerObject.lastCategoryID = [categoryID, eventDate]
+        #         #     else:
+        #         #         self.outerObject.lastCategoryID = [categoryID, eventDate]  # Esta linea debiera ser atomica (Espero)
+        #
+        #         # Verificar si hay hay que cerrar alguna(s) PA con con esta actividad como "cerradora".
+        #
+        #         if self._supportsPA:
+        #             excluded_fields = set(excluded_fields) if isinstance(excluded_fields,
+        #                                                                  (list, set, tuple, dict)) else set()
+        #             # execute_date = self.outerObject._lastCategoryID[1]  # Gets the internal exec. date for lastCategory.
+        #             if isinstance(retValue, int) and self._supportsPA:
+        #                 executeFields = self._classExecuteFields(execution_date=eventDate,
+        #                                                          category=self.outerObject.lastCategoryID)
+        #                 if execute_fields and isinstance(execute_fields, dict):
+        #                     executeFields.update(execute_fields)  # execute_fields adicionales, si se pasan.
+        #                 self._paMatchAndClose(retValue, execute_fields=executeFields, excluded_fields=excluded_fields,
+        #                               **kwargs)  # TODO(cmt): This call is executed asynchronously by another thread
+        #
+        #                 # Updates cols in tblLink, so that external nodes can access Execute Data, Excluded Fields.
+        #                 fldID_Link = tblLink.getVal(0, 'fldID')
+        #                 if fldID_Link:
+        #                     setRecord(self._tblLinkName, fldID=fldID_Link, fldExecuteData=executeFields,
+        #                               fldExcludedFields=excluded_fields)
+        #
+        #                 print(f'\n_________This thread is: {threading.current_thread().name}____________ _'
+        #                       f'setCategory _matchAndClose. outerObject: {self.outerObject.ID}')
+        #
+        #         if flagExecInstance:
+        #             self._paCreateExecInstance(outer_obj=self.outerObject)     # This one also goes to a queue.
+        #     else:
+        #         retValue = f'ERR_Sys_Object not valid or activity not defined: {retValue}- {callerFunction()}'
+        #         krnl_logger.info(retValue)
+        #         print(f'{moduleName()}({lineNum()} - {retValue}', dismiss_print=DISMISS_PRINT)
+        #
+        # elif categoryID == lastCategory:
+        #     retValue = True   # -> True si no hay cambio de Categoria, porque no se genero idActividadRA.
+        # else:
+        #     retValue = f'ERR_Sys_ObjectNotValid or ActivityNotDefined - ID: {self.outerObject.ID} current Category:' \
+        #                f'{self.outerObject.lastCategoryID}; required Category:{categoryID}'
+        #     krnl_logger.warning(f'{moduleName()}({lineNum()}  - {retValue}')
+        #     print(f'{moduleName()}({lineNum()}  - {retValue}', dismiss_print=DISMISS_PRINT)
+        #
+        # return retValue
 
     def _getCategory(self, sDate='', eDate='', *args, event_date=False, **kwargs):
         """
@@ -291,51 +321,112 @@ class AnimalActivity(Activity):     # Abstract Class (no lleva ningun instance a
                        id_type='name'-> Category Name; id_type='id' or no id_type -> Category ID.
         @return: Object DataTable with information from queried table or statusID (int) if mode=val
         """
-        fldName = 'fldFK_Categoria'
-        modeArg = kwargs.get('mode') or 'mem'
-        id_type = kwargs.get('id_type')
-        retValue = None
-        t = time_mt('datetime')
-        # Todo esto para aprovechar los datos en memoria y evitar accesos a DB.
-        outer_obj = self.outerObject
-        if outer_obj.supportsMemData and (not modeArg or 'mem' in modeArg.lower()) and \
-                t - outer_obj._lastCategoryID[1] <= timedelta(minutes=15):
-            # If data was pulled less than 15 minutes ago, returns memory data.
-            if not id_type or 'id' in id_type.lower():  #  Returns data from memory (categoryID)
-                retValue = outer_obj.lastCategoryID if not event_date else outer_obj._lastCategoryID[1]
-            else:
-                retValue = next((j for j in outer_obj.categories if outer_obj.categories[j] ==
-                                 outer_obj.lastCategoryID), None)   # Returns data from memory (categoryName)
-            return retValue
+        categ = self.outerObject.category.compute()   # Always computes categ to get the one corresponding to time_mt()
+        return categ
 
-        modeArg = 'value'
-        tblRA = setupArgs(self._tblRAName, *args)  # __tblRAName viene de class Activity
-        tblLink = setupArgs(self._tblLinkName, *args)  # __tblLinkName viene de class Activity
-        tblData = setupArgs(self._tblDataName, *args, **kwargs)  # __tblDataName seteado INDIVIDUALMENTE.
-        qryTable = self._getRecordsLinkTables(tblRA, tblLink, tblData)
-        if isinstance(qryTable, DataTable):
-            if qryTable.dataLen <= 1:
-                result = qryTable
-            else:
-                result = qryTable.getIntervalRecords('fldDate', sDate, eDate, 1)  # mode=1: Date field.
-            if event_date is True:
-                return result.getVal(0, 'fldDate')
+        # fldName = 'fldFK_Categoria'
+        # modeArg = kwargs.get('mode') or 'mem'
+        # id_type = kwargs.get('id_type')
+        # retValue = None
+        # t = time_mt('datetime')
+        # # Todo esto para aprovechar los datos en memoria y evitar accesos a DB.
+        # outer_obj = self.outerObject
+        # # if outer_obj.supportsMemData and (not modeArg or 'mem' in modeArg.lower()) and \
+        # #         t - outer_obj._lastCategoryID[1] <= timedelta(minutes=15):
+        # #     # If data was pulled less than 15 minutes ago, returns memory data.
+        # #     if not id_type or 'id' in id_type.lower():  #  Returns data from memory (categoryID)
+        # #         retValue = outer_obj.lastCategoryID if not event_date else outer_obj._lastCategoryID[1]
+        # #     else:
+        # #         retValue = next((j for j in outer_obj.categories if outer_obj.categories[j] ==
+        # #                          outer_obj.lastCategoryID), None)   # Returns data from memory (categoryName)
+        # #     return retValue
+        #
+        # modeArg = 'value'
+        # tblRA = setupArgs(self._tblRAName, *args)  # __tblRAName viene de class Activity
+        # tblLink = setupArgs(self._tblLinkName, *args)  # __tblLinkName viene de class Activity
+        # tblData = setupArgs(self._tblDataName, *args, **kwargs)  # __tblDataName seteado INDIVIDUALMENTE.
+        # qryTable = self._getRecordsLinkTables(tblRA, tblLink, tblData)
+        # if isinstance(qryTable, DataTable):
+        #     if qryTable.dataLen <= 1:
+        #         result = qryTable
+        #     else:
+        #         result = qryTable.getIntervalRecords('fldDate', sDate, eDate, 1)  # mode=1: Date field.
+        #     if event_date is True:
+        #         return result.getVal(0, 'fldDate')
+        #
+        #     categID = result.getVal(0, fldName)
+        #     # outer_obj.lastCategoryID = [categID, t]     # Sets values in memory for compute() to work.
+        #     # categID = outer_obj.lastCategoryID      # Gets the latest category, after compute() updated it.
+        #     if 'val' in modeArg.lower():
+        #         # Retorna PRIMER o ULTIMO Registro en funcion de valores de sDate, eDate.
+        #         if not id_type or 'id' in id_type.lower():
+        #             retValue = categID
+        #         else:
+        #             retValue = next((j for j in outer_obj.categories if outer_obj.categories[j] ==
+        #                              categID), None)
+        #     else:
+        #         retValue = result   # Retorna DataTable con registros.
+        # return retValue
 
-            categID = result.getVal(0, fldName)
-            outer_obj.lastCategoryID = [categID, t]     # Sets values in memory for compute() to work.
-            # Recomputes category if time since last check is >1 day. Updates DB and Mem.
-            outer_obj.category.compute()
-            categID = outer_obj.lastCategoryID      # Gets the latest category, after compute() updated it.
-            if 'val' in modeArg.lower():
-                # Retorna PRIMER o ULTIMO Registro en funcion de valores de sDate, eDate.
-                if not id_type or 'id' in id_type.lower():
-                    retValue = categID
-                else:
-                    retValue = next((j for j in outer_obj.categories if outer_obj.categories[j] ==
-                                     categID), None)
-            else:
-                retValue = result   # Retorna DataTable con registros.
-        return retValue
+
+    # def _getCategory01(self, sDate='', eDate='', *args, event_date=False, **kwargs):
+    #     """
+    #     Returns records in table Data Animales Categorias between sValue and eValue. sValue=eValue ='' ->Last record
+    #     If the last update of the value (Category in this case) is less than 1 day old, returns value from memory.
+    #     @param sDate: No args: Last Record; sDate=eDate='': Last Record;
+    #                     sDate='0' or eDate='0': First Record
+    #                     Otherwise: records between sDate and eDate
+    #     @param eDate: See @param sDate.
+    #     @param event_date: True -> returns the date lastCategoryID was set (_lastCategoryID[1])
+    #     @param kwargs: mode='value' -> Returns value from DB.
+    #                    id_type='name'-> Category Name; id_type='id' or no id_type -> Category ID.
+    #     @return: Object DataTable with information from queried table or statusID (int) if mode=val
+    #     """
+    #     fldName = 'fldFK_Categoria'
+    #     modeArg = kwargs.get('mode') or 'mem'
+    #     id_type = kwargs.get('id_type')
+    #     retValue = None
+    #     t = time_mt('datetime')
+    #     # Todo esto para aprovechar los datos en memoria y evitar accesos a DB.
+    #     outer_obj = self.outerObject
+    #     # if outer_obj.supportsMemData and (not modeArg or 'mem' in modeArg.lower()) and \
+    #     #         t - outer_obj._lastCategoryID[1] <= timedelta(minutes=15):
+    #     #     # If data was pulled less than 15 minutes ago, returns memory data.
+    #     #     if not id_type or 'id' in id_type.lower():  #  Returns data from memory (categoryID)
+    #     #         retValue = outer_obj.lastCategoryID if not event_date else outer_obj._lastCategoryID[1]
+    #     #     else:
+    #     #         retValue = next((j for j in outer_obj.categories if outer_obj.categories[j] ==
+    #     #                          outer_obj.lastCategoryID), None)   # Returns data from memory (categoryName)
+    #     #     return retValue
+    #
+    #     modeArg = 'value'
+    #     tblRA = setupArgs(self._tblRAName, *args)  # __tblRAName viene de class Activity
+    #     tblLink = setupArgs(self._tblLinkName, *args)  # __tblLinkName viene de class Activity
+    #     tblData = setupArgs(self._tblDataName, *args, **kwargs)  # __tblDataName seteado INDIVIDUALMENTE.
+    #     qryTable = self._getRecordsLinkTables(tblRA, tblLink, tblData)
+    #     if isinstance(qryTable, DataTable):
+    #         if qryTable.dataLen <= 1:
+    #             result = qryTable
+    #         else:
+    #             result = qryTable.getIntervalRecords('fldDate', sDate, eDate, 1)  # mode=1: Date field.
+    #         if event_date is True:
+    #             return result.getVal(0, 'fldDate')
+    #
+    #         categID = result.getVal(0, fldName)
+    #         # outer_obj.lastCategoryID = [categID, t]     # Sets values in memory for compute() to work.
+    #         # categID = outer_obj.lastCategoryID      # Gets the latest category, after compute() updated it.
+    #         if 'val' in modeArg.lower():
+    #             # Retorna PRIMER o ULTIMO Registro en funcion de valores de sDate, eDate.
+    #             if not id_type or 'id' in id_type.lower():
+    #                 retValue = categID
+    #             else:
+    #                 retValue = next((j for j in outer_obj.categories if outer_obj.categories[j] ==
+    #                                  categID), None)
+    #         else:
+    #             retValue = result   # Retorna DataTable con registros.
+    #     return retValue
+    #
+
 
 
     # def _getCategory00(self, sDate='', eDate='', *args, event_date=False, **kwargs):
@@ -400,120 +491,126 @@ class AnimalActivity(Activity):     # Abstract Class (no lleva ningun instance a
     def tblDataProgramacionName(cls):
         return cls.__tblProgActivitiesName
 
-    @classmethod
-    def processReplicated(cls):         # Run by AnimalActivity
-        """             ******  Run periodically as IntervalTimer func. ******
-                        ****** This code should (hopefully) execute in LESS than 5 msec (switchinterval).   ******
-        Used to execute logic for detection and management of INSERTed, UPDATEd and duplicate objects.
-        Defined for Animal, Tag, Person, Geo.
-        Checks for additions to tblAnimales from external sources (replication from other nodes) for Valid and
-        Active objects. Updates _fldID_list, _object_fldUPDATE_dict
-        @return: True if update operation succeeds, False if reading tblAnimales from db fails.
-        """
-        temp = getRecords(cls._tblRAName, '', '', None, '*', fldDateExit=0)
-        if not isinstance(temp, DataTable):
-            return False
 
-        # 1. INSERT -> Checks for INSERTED new Records verifying the status of the last-stored fldID col and locally
-        # added records then, process repeats/duplicates.
-        krnl_logger.info(f"---------------- INSIDE {cls.__class__.__name__}.processReplicated()!! -------------------")
-        pulled_fldIDCol = temp.getCol('fldID')
-        newRecords = set(pulled_fldIDCol).difference(cls._fldID_list)
-        if newRecords:
-            newRecords = list(newRecords)
-            pulledIdentifiersCol = temp.getCol('fldTagNumber')  # List of lists. Each of the lists contains UIDs.
-            fullIdentifiers = []  # List of ALL identifiers from temp table, to check for repeat objects.
-            for lst in pulledIdentifiersCol:
-                if isinstance(lst, (list, tuple, set)):
-                    fullIdentifiers.extend(lst)
-                else:
-                    fullIdentifiers.append(lst)
-            fullIdentifiers = set(fullIdentifiers)
-            # TODO(cmt): here runs the logic for duplicates resolution for each of the uids in newRecords.
-            for j in newRecords:  # newRecords: ONLY records NOT found in _fldID_list from previous call.
-                # TODO: Pick the right cls (Bovine, Caprine, etc).
-                obj_dict = temp.unpackItem(pulled_fldIDCol.index(j))
-                objClass = Tag
-                obj = objClass(**obj_dict)
 
-                # If record is repeat (at least one of its identifiers is found in cls._identifiers), updates repeat
-                # records for databases that might have created repeats. Changes are propagated by the replicator.
-                identifs = obj.tagNumber  # getIdentifiers() returns set of identifiers UIDs.
 
-                """ Checks for duplicate/repeat objects: Must determine which one is the Original and set the record's 
-                fldObjectUID field with the UUID of the Original object and fldExitDate to flag it's a duplicate.
-                """
-                # Note: the search for common identifiers and the logic of using timeStamp assures there is ALWAYS
-                # an Original object to fall back to, to ensure integrity of the database operations.
-                if fullIdentifiers.intersection(identifs):
-                    # TODO(cmt): Here detected duplicates: Assigns Original and duplicates based on myTimeStamp.
-                    for o in objClass.getRegisterDict().values():
-                        if o.tagNumber == identifs:
-                            if o.myTimeStamp <= obj.myTimeStamp:
-                                original = o
-                                duplicate = obj
-                            else:
-                                original = obj
-                                duplicate = o
-                            original.tagNumber = duplicate.tagNumber  # for data integrity.
-                            setRecord(cls.tblObjName(), fldID=duplicate.recordID, fldObjectUID=original.ID,
-                                      fldExitDate=time_mt('datetime'))
-                            setRecord(cls.tblObjName(), fldID=original.recordID, fldTagNumber=original.tagNumber)
-                            break
-                elif obj_dict.get('fldDB_ID') != MAIN_DB_ID:
-                    # If record is not duplicate and comes from another node, adds it to __registerDict.
-                    obj.register()
 
-        # 2. UPDATE - Checks for UPDATED records modified in other nodes and replicated to this database. Checks are
-        # performed based on value of fldUPDATE field (a dictionary) in each record.
-        # The check for the node generating the UPDATE is done here in order to avoid unnecessary setting values twice.
-        # UPDATEDict = {temp.getVal(j, 'fldID'): temp.getVal(j, 'fldUPDATE') for j in range(temp.dataLen) if
-        #               temp.getVal(j, 'fldUPDATE')}  # Creates dict only with non-NULL (populated) items.
-        UPDATEDict = {}
-        for j in range(temp.dataLen):
-            if temp.getVal(j, 'fldUPDATE'):
-                d1 = temp.unpackItem(j)
-                UPDATEDict[d1['fldID']] = d1['fldUPDATE']
-        changed = {k: UPDATEDict[k] for k in UPDATEDict if k not in cls._object_fldUPDATE_dict or
-                   (k in cls._object_fldUPDATE_dict and UPDATEDict[k] != cls._object_fldUPDATE_dict[k])}
-        if changed:  # changed = {fldID: fldUPDATE(int), }
-            for k in changed:  # updates all records in local database with records updated by other nodes.
-                # Update memory structures here: __registerDict, exitDate, etc, based on passed fldNames, values.
-                changedRecord = temp.unpackItem(fldID=k)
-                objClass = Tag
-                if objClass:
-                    obj = next((o for o in objClass.getRegisterDict().values() if o.recordID == k), None)
-                    if obj:
-                        # TODO(cmt): UPDATEs obj specific attributes with values from read db record.
-                        obj.updateAttributes(**changedRecord)
-                        if changedRecord.get('fldObjectUID', 0) != obj.ID:
-                            obj.setID(changedRecord['fldObjectUID'])
-                        if changedRecord.get('fldDateExit', 0) != obj.exitDate:
-                            obj.setExitDate(changedRecord['fldDateExit'])
-                            obj.isActive = False
-                            obj.unregister()
-                # Updates _object_fldUPDATE_dict (of the form {fldID: UUID(str), }) to latest values.
-                cls._object_fldUPDATE_dict[k] = changed[k]
 
-        # 3. BAJA / DELETE -> For DELETEd Records and records with fldExitDate !=0, removes object from __registerDict.
-        temp1 = getRecords(cls.tblObjName(), '', '', None, '*')
-        if not isinstance(temp, DataTable):
-            return False
-        # Removes from __registerDict Tag with fldExitDate (exit_recs) and DELETE (deleted_recs) executed in other nodes
-        all_recs = temp1.getCol('fldID')
-        exit_recs = set(all_recs).difference(pulled_fldIDCol)  # records with fldExitDate != 0.
-        remove_recs = exit_recs.difference(cls._fldID_exit_list)  # Compara con lista de exit Records ya procesados.
-        deleted_recs = set(cls._fldID_list).difference(pulled_fldIDCol)
-        remove_recs = remove_recs.union(deleted_recs) or []
-        for i in remove_recs:
-            obj = next((o for o in cls.getRegisterDict().values() if o.recordID == i), None)
-            if obj:
-                obj.unregister()
-
-        # Updates list of fldID and list of records with fldExitDate > 0 (Animales con Salida).
-        cls._fldID_list = pulled_fldIDCol.copy()  # [o.recordID for o in cls.getRegisterDict().values()]
-        cls._fldID_exit_list = exit_recs.copy()
-        return True
+    # @classmethod
+    # def processReplicated00(cls):  # Old version. ALL THIS IS ALREADY REPLACED BY Animales trigger AFTER INSERT.!!
+    #     """             ******  Run periodically as IntervalTimer func. ******
+    #                     ****** This code should (hopefully) execute in LESS than 5 msec (switchinterval).   ******
+    #     Used to execute logic for detection and management of INSERTed, UPDATEd and duplicate objects.
+    #     Defined for Animal, Tag, Person, Geo.
+    #     Checks for additions to tblAnimales from external sources (replication from other nodes) for Valid and
+    #     Active objects. Updates _fldID_list, _object_fldUPDATE_dict
+    #     @return: True if update operation succeeds, False if reading tblAnimales from db fails.
+    #     """
+    #     sql = f'SELECT * from "{cls.tblObjDBName()}" WHERE "Salida YN" == 0 OR "Salida YN" IS NULL; '
+    #     temp = dbRead(cls.tblObjName(), sql)
+    #     if not isinstance(temp, DataTable) or not temp:
+    #         return False
+    #
+    #     # 1. INSERT -> Checks for INSERTED new Records verifying the status of the last-stored fldID col and locally
+    #     # added records then, process repeats/duplicates.
+    #     krnl_logger.info(f"---------------- INSIDE {cls.__class__.__name__}._processDuplicates()!! -------------------")
+    #     pulled_fldIDCol = temp.getCol('fldID')
+    #     newRecords = set(pulled_fldIDCol).difference(cls._fldID_list)
+    #     if newRecords:
+    #         newRecords = list(newRecords)
+    #         pulledIdentifiersCol = temp.getCol('fldTagNumber')  # List of lists. Each of the lists contains UIDs.
+    #         fullIdentifiers = []  # List of ALL identifiers from temp table, to check for repeat objects.
+    #         for lst in pulledIdentifiersCol:
+    #             if isinstance(lst, (list, tuple, set)):
+    #                 fullIdentifiers.extend(lst)
+    #             else:
+    #                 fullIdentifiers.append(lst)
+    #         fullIdentifiers = set(fullIdentifiers)
+    #         # TODO(cmt): here runs the logic for duplicates resolution for each of the uids in newRecords.
+    #         for j in newRecords:  # newRecords: ONLY records NOT found in _fldID_list from previous call.
+    #             # TODO: Pick the right cls (Bovine, Caprine, etc).
+    #             obj_dict = temp.unpackItem(pulled_fldIDCol.index(j))
+    #             objClass = Tag
+    #             obj = objClass(**obj_dict)
+    #
+    #             # If record is repeat (at least one of its identifiers is found in cls._identifiers), updates repeat
+    #             # records for databases that might have created repeats. Changes are propagated by the replicator.
+    #             identifs = obj.tagNumber  # getIdentifiers() returns set of identifiers UIDs.
+    #
+    #             """ Checks for duplicate/repeat objects: Must determine which one is the Original and set the record's
+    #             fldObjectUID field with the UUID of the Original object and fldExitDate to flag it's a duplicate.
+    #             """
+    #             # Note: the search for common identifiers and the logic of using timeStamp assures there is ALWAYS
+    #             # an Original object to fall back to, to ensure integrity of the database operations.
+    #             if fullIdentifiers.intersection(identifs):
+    #                 # TODO(cmt): Here detected duplicates: Assigns Original and duplicates based on myTimeStamp.
+    #                 for o in objClass.getRegisterDict().values():
+    #                     if o.tagNumber == identifs:
+    #                         if o.myTimeStamp <= obj.myTimeStamp:
+    #                             original = o
+    #                             duplicate = obj
+    #                         else:
+    #                             original = obj
+    #                             duplicate = o
+    #                         original.tagNumber = duplicate.tagNumber  # for data integrity.
+    #                         setRecord(cls.tblObjName(), fldID=duplicate.recordID, fldObjectUID=original.ID,
+    #                                   fldExitDate=time_mt('datetime'))
+    #                         setRecord(cls.tblObjName(), fldID=original.recordID, fldTagNumber=original.tagNumber)
+    #                         break
+    #             elif obj_dict.get('fldTerminal_ID') != TERMINAL_ID:
+    #                 # If record is not duplicate and comes from another node, adds it to __registerDict.
+    #                 obj.register()
+    #
+    #     # 2. UPDATE - Checks for UPDATED records modified in other nodes and replicated to this database. Checks are
+    #     # performed based on value of fldUPDATE field (a dictionary) in each record.
+    #     # The check for the node generating the UPDATE is done here in order to avoid unnecessary setting values twice.
+    #     # UPDATEDict = {temp.getVal(j, 'fldID'): temp.getVal(j, 'fldUPDATE') for j in range(temp.dataLen) if
+    #     #               temp.getVal(j, 'fldUPDATE')}  # Creates dict only with non-NULL (populated) items.
+    #     UPDATEDict = {}
+    #     for j in range(temp.dataLen):
+    #         if temp.getVal(j, 'fldUPDATE'):
+    #             d1 = temp.unpackItem(j)
+    #             UPDATEDict[d1['fldID']] = d1['fldUPDATE']
+    #     changed = {k: UPDATEDict[k] for k in UPDATEDict if k not in cls._object_fldUPDATE_dict or
+    #                (k in cls._object_fldUPDATE_dict and UPDATEDict[k] != cls._object_fldUPDATE_dict[k])}
+    #     if changed:  # changed = {fldID: fldUPDATE(int), }
+    #         for k in changed:  # updates all records in local database with records updated by other nodes.
+    #             # Update memory structures here: __registerDict, exitDate, etc, based on passed fldNames, values.
+    #             changedRecord = temp.unpackItem(fldID=k)
+    #             objClass = Tag
+    #             if objClass:
+    #                 obj = next((o for o in objClass.getRegisterDict().values() if o.recordID == k), None)
+    #                 if obj:
+    #                     # TODO(cmt): UPDATEs obj specific attributes with values from read db record.
+    #                     obj.updateAttributes(**changedRecord)
+    #                     if changedRecord.get('fldObjectUID', 0) != obj.ID:
+    #                         obj.setID(changedRecord['fldObjectUID'])
+    #                     if changedRecord.get('fldDateExit', 0) != obj.exitDate:
+    #                         obj.setExitDate(changedRecord['fldDateExit'])
+    #                         obj.isActive = False
+    #                         obj.unregister()
+    #             # Updates _object_fldUPDATE_dict (of the form {fldID: UUID(str), }) to latest values.
+    #             cls._object_fldUPDATE_dict[k] = changed[k]
+    #
+    #     # 3. BAJA / DELETE -> For DELETEd Records and records with fldExitDate !=0, removes object from __registerDict.
+    #     temp1 = getRecords(cls.tblObjName(), '', '', None, '*')
+    #     if not isinstance(temp, DataTable):
+    #         return False
+    #     # Removes from __registerDict Tag with fldExitDate (exit_recs) and DELETE (deleted_recs) executed in other nodes
+    #     all_recs = temp1.getCol('fldID')
+    #     exit_recs = set(all_recs).difference(pulled_fldIDCol)  # records with fldExitDate != 0.
+    #     remove_recs = exit_recs.difference(cls._fldID_exit_list)  # Compara con lista de exit Records ya procesados.
+    #     deleted_recs = set(cls._fldID_list).difference(pulled_fldIDCol)
+    #     remove_recs = remove_recs.union(deleted_recs) or []
+    #     for i in remove_recs:
+    #         obj = next((o for o in cls.getRegisterDict().values() if o.recordID == i), None)
+    #         if obj:
+    #             obj.unregister()
+    #
+    #     # Updates list of fldID and list of records with fldExitDate > 0 (Animales con Salida).
+    #     cls._fldID_list = pulled_fldIDCol.copy()  # [o.recordID for o in cls.getRegisterDict().values()]
+    #     cls._fldID_exit_list = exit_recs.copy()
+    #     return True
 
 # --------------------------------------------- Fin Class AnimalActivity --------------------------------------------- #
 
@@ -756,8 +853,7 @@ class InventoryActivityAnimal(AnimalActivity):
         if isinstance(retValue, int) and self._supportsPA:
             excluded_fields = set(excluded_fields) if isinstance(excluded_fields, (list, set, tuple, dict)) else set()
             excluded_fields.update(self.getActivityExcludedFieldsClose(self.__activityName))
-            execute_date = self.outerObject._lastInventory[1]  # Gets the internal execution date for lastInventory.
-            executeFields = self._classExecuteFields(execution_date=execute_date)
+            executeFields = self._classExecuteFields(execution_date=self.outerObject.inventory.get())
             if execute_fields and isinstance(execute_fields, dict):
                 executeFields.update(execute_fields)  # execute_fields adicionales, si se pasan.
             self._paMatchAndClose(retValue, execute_fields=executeFields, excluded_fields=excluded_fields)
@@ -1253,7 +1349,7 @@ class TagActivityAnimal(AnimalActivity):
         super().__init__(self.__activityName, *args, tbl_data_name=self.__tblDataName, **kwargs)
 
     @staticmethod
-    def __tagRegister():
+    def __tagRegister():                # TODO: Tag.getRegisterDict() IS DEPRECATED. DO NOT USE!
         """ Returns full Tag registerDict. Link to class Tag data structures.  Internal use only (cannot call with
         @property tags)  """
         return Tag.getRegisterDict()
@@ -1267,92 +1363,118 @@ class TagActivityAnimal(AnimalActivity):
             args[0]: Desasignados from RA: list of fldID of Activity #25 (Caravaneo - Desasignar)
         @return: None if all OK. ERR_ (str) if error.
         """
-        if not self._isValid:
-            retValue = f'ERR_Sys_ObjectNotValid - {callerFunction()}()'
-            print(f'{moduleName()}({lineNum()}) - {retValue}', dismiss_print=DISMISS_PRINT)
-            return retValue
-        elif not self.outerObject.validateActivity(self._activityName):
+        if not self.outerObject.validateActivity(self._activityName):
             retValue = f'ERR_Sys_ActivityNotDefined - {callerFunction()}()'
             print(f'{moduleName()}({lineNum()}) - {retValue}', dismiss_print=DISMISS_PRINT)
-            return retValue
+            return None
 
-        tagObjects = [o for o in Tag.getRegisterDict().values() if o.ID in self.outerObject.getIdentifiers()]
-        if len(tagObjects) != len(self.outerObject.getIdentifiers()):
-            # TODO(cmt): "Work with what's available" here:
-            # Some identifiers are not loaded as Tag objects in Tag.registerDict(). Try loading from Caravanas table
-            # in case that memory-updating routines haven't processed the data just yet.
-            Tag.processReplicated()     # This one should be re-entrant. It must be.
-
-        if tagObjects:
-            self.outerObject.setMyTags(*tagObjects)
-            # print(f'...Now setting tags: {[t.tagNumber for t in tagObjects]}')
+        tagIDs = self.outerObject.getIdentifiers()      # list of tag UIDs
+        objList = []
+        for i in tagIDs:
+            obj = Tag.getObject(i)
+            if isinstance(obj, Tag):
+                objList.append(obj)
+        if objList:
+            self.outerObject.setMyTags(*objList)
+            # print(f'...Now setting tags: {self.outerObject.myTagIDs}')
             return True
+        return None
 
 
-        # Old code, for when __identifiers is not set in self.outerObject.
-        dataRADesasignados = args[0] if args else \
-            getRecords('tblAnimalesRegistroDeActividades', '', '', None, "*",
-                       fldFK_NombreActividad=self.activities['Caravaneo - Desasignar'])
-        __tblRA = setupArgs(self._tblRAName, *args)
-        __tblLink = setupArgs(self._tblLinkName, *args)
-        __tblData = setupArgs(self.__tblDataName, *args, **kwargs)
-        # animalClassName = self.outerObject.animalClassName
-
-        # Registros de Asignacion/Desasignacion de Caravanas para el idAnimal
-        animalTagRecords = self._getRecordsLinkTables(__tblRA, __tblLink, __tblData, activity_list=('Alta', 'Caravaneo',
-                                                     'Caravaneo - Desasignar'))
-        skipList = []  # fldID de Registros que se deben excluir por Desasignacion de Caravanas.
-        idCaravanaList = []  # Lista de ID_Caravana que se deben asignar al Animal
-        if dataRADesasignados.dataLen:
-            for i in range(animalTagRecords.dataLen):  # Puebla skipList con idActividad de Caravanas desasignadas
-                if animalTagRecords.getVal(i, 'fldFK_Actividad') in dataRADesasignados.dataList:
-                    for j in range(animalTagRecords.dataLen):
-                        if animalTagRecords.getVal(j, 'fldFK_Caravana') == animalTagRecords.getVal(i, 'fldFK_Caravana'):        # TODO: Aqui puede comparar UUIDs directamente.
-                            skipList.append(animalTagRecords.getVal(j, 'fldFK_Actividad'))
-                    skipList.append(animalTagRecords.getVal(i, 'fldFK_Actividad'))
-
-        for i in range(animalTagRecords.dataLen):  # PUebla idCaravanaList solo con Tags activos
-            if animalTagRecords.getVal(i, 'fldFK_Actividad') is not None and \
-                    animalTagRecords.getVal(i, 'fldFK_Actividad') not in skipList:
-                idCaravanaList.append(animalTagRecords.getVal(i, 'fldFK_Caravana'))  # agrega ID_Caravana (UUID)
-
-        # Asigna Tags al Animal: Busca en Tag.__registerDict y si no esta ahi, crea la caravana.
-        retValue = None
-        if idCaravanaList:
-            # idCaravanaList = [f'"{j}"' for j in idCaravanaList]
-            tagRecords = getRecords('tblCaravanas', '', '', None, '*', fldObjectUID=idCaravanaList)
-            if isinstance(tagRecords, str):
-                retValue = f'ERR_Sys_CannotInitializeTag {idCaravanaList}'
-                krnl_logger.error(retValue)
-                return retValue
-            else:
-                idCaravanaList = tagRecords.getCol('fldObjectUID')  # OJO: getCol ignora (salta) registros vacios de _dataList
-            for j in range(len(idCaravanaList)):
-                if idCaravanaList[j] in self.__tagRegister():  # __registerDict Tag Class correspondiente
-                    self.outerObject.setMyTags(self.__tagRegister()[idCaravanaList[j]])
-                else:  # Si Tag no existe en TagRegisterDict la crea buscando el ID de la caravana en DB
-                    tempTag = Tag(**tagRecords.unpackItem(j))  # Crea tag con datos de record fldID=idCaravanaList[j]
-                    # Si existe ya un tag con el mismo UID para la clase de objeto outerObject, da WARNING y sale.
-                    if any(self.__tagRegister()[j].ID == tempTag.ID and self.__tagRegister()[j].assignedToClass ==
-                           tempTag.assignedToClass and not self.__tagRegister()[j].isAvailable
-                           for j in self.__tagRegister()):
-                        retValue = f'INFO_CannotAssignTag: Tag UID {tempTag.tagNumber} / {tempTag.ID} already in use. '\
-                                   f'Tag was not assigned to Object {self.outerObject.ID}'
-                        krnl_logger.warn(retValue, stack_info=True)
-                    else:
-                        if tempTag.assignedToClass != self.outerObject.__class__.__name__:
-                            _ = setRecord(self.__tblObjectsName, fldID=tempTag.recordID,
-                                          fldAssignedToClass=self.outerObject.__class__.__name__)  # TODO:HAS to be name
-                            if isinstance(_, str):
-                                retValue = f'ERR_DBWrite: Cannot write table {self.__tblObjectsName}'
-                                krnl_logger.error(retValue, stack_info=True)
-                                # self.outerObject = None  # Removes object from list. Enables recursion/reentry.
-                                return retValue
-                            else:
-                                tempTag.assignedToClass = self.outerObject.__class__.__name__
-                        tempTag.register()
-                        self.outerObject.setMyTags(tempTag)
-        return retValue
+    # def initializeTags00(self, *args, **kwargs):        # Old version
+    #     """
+    #     Assigns all active tags to ID_Animal (self), pulling the tags (previously assigned to the Animal)
+    #     from [Data Animales Actividades Caravanas]. If tags are not found, leaves myTags as empty set.
+    #     args: DataTables with info needed to process Tags. Passed as args to minimize DB reads.
+    #         args[0]: Desasignados from RA: list of fldID of Activity #25 (Caravaneo - Desasignar)
+    #     @return: None if all OK. ERR_ (str) if error.
+    #     """
+    #     if not self._isValid:
+    #         retValue = f'ERR_Sys_ObjectNotValid - {callerFunction()}()'
+    #         print(f'{moduleName()}({lineNum()}) - {retValue}', dismiss_print=DISMISS_PRINT)
+    #         return retValue
+    #     elif not self.outerObject.validateActivity(self._activityName):
+    #         retValue = f'ERR_Sys_ActivityNotDefined - {callerFunction()}()'
+    #         print(f'{moduleName()}({lineNum()}) - {retValue}', dismiss_print=DISMISS_PRINT)
+    #         return retValue
+    #
+    #     tagObjects = [o for o in Tag.getRegisterDict().values() if o.ID in self.outerObject.getIdentifiers()]
+    #     if len(tagObjects) != len(self.outerObject.getIdentifiers()):
+    #         # TODO(cmt): "Work with what's available" here:
+    #         # Some identifiers are not loaded as Tag objects in Tag.registerDict(). Try loading from Caravanas table
+    #         # in case that memory-updating routines haven't processed the data just yet.
+    #         Tag.processReplicated()     # This one should be re-entrant. It must be.
+    #
+    #     if tagObjects:
+    #         self.outerObject.setMyTags(*tagObjects)
+    #         # print(f'...Now setting tags: {[t.tagNumber for t in tagObjects]}')
+    #         return True
+    #
+    #
+    #     # Old code, for when __identifiers is not set in self.outerObject.
+    #     dataRADesasignados = args[0] if args else \
+    #         getRecords('tblAnimalesRegistroDeActividades', '', '', None, "*",
+    #                    fldFK_NombreActividad=self.activities['Caravaneo - Desasignar'])
+    #     __tblRA = setupArgs(self._tblRAName, *args)
+    #     __tblLink = setupArgs(self._tblLinkName, *args)
+    #     __tblData = setupArgs(self.__tblDataName, *args, **kwargs)
+    #     # animalClassName = self.outerObject.animalClassName
+    #
+    #     # Registros de Asignacion/Desasignacion de Caravanas para el idAnimal
+    #     animalTagRecords = self._getRecordsLinkTables(__tblRA, __tblLink, __tblData, activity_list=('Alta', 'Caravaneo',
+    #                                                  'Caravaneo - Desasignar'))
+    #     skipList = []  # fldID de Registros que se deben excluir por Desasignacion de Caravanas.
+    #     idCaravanaList = []  # Lista de ID_Caravana que se deben asignar al Animal
+    #     if dataRADesasignados.dataLen:
+    #         for i in range(animalTagRecords.dataLen):  # Puebla skipList con idActividad de Caravanas desasignadas
+    #             if animalTagRecords.getVal(i, 'fldFK_Actividad') in dataRADesasignados.dataList:
+    #                 for j in range(animalTagRecords.dataLen):
+    #                     if animalTagRecords.getVal(j, 'fldFK_Caravana') == animalTagRecords.getVal(i, 'fldFK_Caravana'):        # TODO: Aqui puede comparar UUIDs directamente.
+    #                         skipList.append(animalTagRecords.getVal(j, 'fldFK_Actividad'))
+    #                 skipList.append(animalTagRecords.getVal(i, 'fldFK_Actividad'))
+    #
+    #     for i in range(animalTagRecords.dataLen):  # PUebla idCaravanaList solo con Tags activos
+    #         if animalTagRecords.getVal(i, 'fldFK_Actividad') is not None and \
+    #                 animalTagRecords.getVal(i, 'fldFK_Actividad') not in skipList:
+    #             idCaravanaList.append(animalTagRecords.getVal(i, 'fldFK_Caravana'))  # agrega ID_Caravana (UUID)
+    #
+    #     # Asigna Tags al Animal: Busca en Tag.__registerDict y si no esta ahi, crea la caravana.
+    #     retValue = None
+    #     if idCaravanaList:
+    #         # idCaravanaList = [f'"{j}"' for j in idCaravanaList]
+    #         tagRecords = getRecords('tblCaravanas', '', '', None, '*', fldObjectUID=idCaravanaList)
+    #         if isinstance(tagRecords, str):
+    #             retValue = f'ERR_Sys_CannotInitializeTag {idCaravanaList}'
+    #             krnl_logger.error(retValue)
+    #             return retValue
+    #         else:
+    #             idCaravanaList = tagRecords.getCol('fldObjectUID')  # OJO: getCol ignora (salta) registros vacios de _dataList
+    #         for j in range(len(idCaravanaList)):
+    #             if idCaravanaList[j] in self.__tagRegister():  # __registerDict Tag Class correspondiente
+    #                 self.outerObject.setMyTags(self.__tagRegister()[idCaravanaList[j]])
+    #             else:  # Si Tag no existe en TagRegisterDict la crea buscando el ID de la caravana en DB
+    #                 tempTag = Tag(**tagRecords.unpackItem(j))  # Crea tag con datos de record fldID=idCaravanaList[j]
+    #                 # Si existe ya un tag con el mismo UID para la clase de objeto outerObject, da WARNING y sale.
+    #                 if any(self.__tagRegister()[j].ID == tempTag.ID and self.__tagRegister()[j].assignedToClass ==
+    #                        tempTag.assignedToClass and not self.__tagRegister()[j].isAvailable
+    #                        for j in self.__tagRegister()):
+    #                     retValue = f'INFO_CannotAssignTag: Tag UID {tempTag.tagNumber} / {tempTag.ID} already in use. '\
+    #                                f'Tag was not assigned to Object {self.outerObject.ID}'
+    #                     krnl_logger.warn(retValue, stack_info=True)
+    #                 else:
+    #                     if tempTag.assignedToClass != self.outerObject.__class__.__name__:
+    #                         _ = setRecord(self.__tblObjectsName, fldID=tempTag.recordID,
+    #                                       fldAssignedToClass=self.outerObject.__class__.__name__)  # TODO:HAS to be name
+    #                         if isinstance(_, str):
+    #                             retValue = f'ERR_DBWrite: Cannot write table {self.__tblObjectsName}'
+    #                             krnl_logger.error(retValue, stack_info=True)
+    #                             # self.outerObject = None  # Removes object from list. Enables recursion/reentry.
+    #                             return retValue
+    #                         else:
+    #                             tempTag.assignedToClass = self.outerObject.__class__.__name__
+    #                     tempTag.register()
+    #                     self.outerObject.setMyTags(tempTag)
+    #     return retValue
 
 
     # Animal: Caravaneo / Caravanas: Comision, Reemplazo, Reemision
@@ -1370,11 +1492,10 @@ class TagActivityAnimal(AnimalActivity):
             retValue = f'ERR_Sys_ObjectNotValid or ActivityNotValid - {callerFunction()}()'
             krnl_logger.info(retValue)
             print(f'{moduleName()}({lineNum()}) - {retValue}', dismiss_print=DISMISS_PRINT)
-            # self.outerObject = None  # Removes object from list. Enables recursion/reentry.
             return retValue
 
         tags = kwargs.get('tags', [])
-        tags = tags if hasattr(tags, '__iter__') else list(tags)
+        tags = tags if hasattr(tags, '__iter__') else [tags, ]
         tags = [j for j in tags if isinstance(j, Tag)]
         if tags:
             __tblRA = setupArgs(self._tblRAName, *args)
@@ -1382,8 +1503,9 @@ class TagActivityAnimal(AnimalActivity):
             __tblData = setupArgs(self.__tblDataName, *args, **kwargs)
             activityID = activityID or __tblRA.getVal(0, 'fldFK_NombreActividad')
             __tblRA.setVal(0, fldFK_NombreActividad=activityID)
+
             # Valida que todos los tag IDs esten en tabla tblCaravanas
-            tagRecords = getRecords(self.__tblObjectsName, '', '', None, '*', fldObjectUID=[t.ID for t in tags])
+            tagRecords = getRecords(self.__tblObjectsName, '', '', None, '*', fldObjectUID=tuple([t.ID for t in tags]))
             if isinstance(tagRecords, str):
                 retValue = f'ERR_DBRread: Cannot read table {self.__tblObjectsName}'
                 krnl_logger.error(retValue, stack_info=True, exc_info=True)
@@ -1433,17 +1555,20 @@ class TagActivityAnimal(AnimalActivity):
                         # Actualiza tblCaravanas con fldAssignedToClass=Nombre de clase del objeto al que se asigna t
                         if t.ID in idCol:
                             _ = setRecord(self.__tblObjectsName, fldID=t.recordID,
-                                          fldAssignedToClass=self.outerObject.__class__.__name__)
+                                          fldAssignedToClass=self.outerObject.__class__.__name__,
+                                          fldAssignedToUID=self.outerObject.ID)
                             if isinstance(_, str):
                                 retValue = f'ERR_DBWrite: Cannot write table {self.__tblObjectsName}'
                                 krnl_logger.error(retValue, stack_info=True)
                                 continue   # Continua a procesar el siguiente tag.
                             else:
                                 t.assignedToClass = self.outerObject.__class__.__name__
+                                # Setea datos de tag en tbl del outerObject al que se asigna la Caravana
+                                self.outerObject.setIdentifier(t.ID)
                         else:
                             retValue = f'ERR_Sys: Tag Number {t.tagNumber} / ID={t.ID} not found in DB'
                             krnl_logger.error(retValue, stack_info=True)
-                            break   # Continua a procesar el siguiente tag.
+                            continue   # Continua a procesar el siguiente tag.
 
                     self.outerObject.setMyTags(t)  # registra Tag en el array de Tags del Animal
                     t.commission.set(activityName=tagActivity)  # Comisiona y Setea status de
@@ -1451,9 +1576,8 @@ class TagActivityAnimal(AnimalActivity):
             tagIDs = self.outerObject.myTagIDs          # convierte lista a json para escribir en DB.
             __tblData.appendRecord(fldFK_Actividad=idActividadRA, fldFK_Caravana=tagIDs, fldDate=eventDate,
                                    fldComment=f'Actividad: {activityName}. Tag ID: {tagIDs}')
-            __tblData.undoOnError = False
-            wrtTables.append(__tblData)
 
+            wrtTables.append(__tblData)
             if __tblData.dataLen:
                 retValue = [setRecord(j.tblName, **j.unpackItem(0)) for j in wrtTables]
             else:
@@ -1474,7 +1598,7 @@ class TagActivityAnimal(AnimalActivity):
                     self.outerObject.inventory.set(*args, **kwargs)
             # self.outerObject = None  # Removes object from list. Enables recursion/reentry.
             return retValue
-
+        return None
 
     def deassignTags(self, *args: DataTable, **kwargs):         # Caravaneo - Desasignar (ID=71)
         """
@@ -1525,11 +1649,13 @@ class TagActivityAnimal(AnimalActivity):
 
             for t in tags:
                 if isinstance(t, Tag):
-                    self.outerObject.popMyTags(t)   # retira el Tag del Diccionario __myTags
+                    self.outerObject.popMyTags(t)           # retira el Tag del Diccionario __myTags
+                    self.outerObject.removeIdentifer(t.ID)    # quita de self.__identifiers y del record en Animales.
                     t.commission.unset(**kwargs)    # Decomisiona tag y Setea status
                     tblData.appendRecord(fldFK_Actividad=idActividadRA, fldDate=eventDate, fldFK_Caravana=t.ID,
                         fldComment=tblData.getVal(0, 'fldComment', '')+f'{activityName}. Tag ID:{[t.ID for t in tags]}')
-            tblData.undoOnError = False
+
+
             wrtTables.append(tblData)
             errorStr = None
             if tblData.dataLen:
@@ -1663,8 +1789,8 @@ class ProgActivityAnimal(ProgActivity):
         @return: ProgActivity Object. ERR_ (str) if class is not valid or if recordActivity() finished with errors.
         """
         obj = super()._paCreateActivity(activity_id, *args, enable_activity, **kwargs)
-        if isinstance(obj, cls):
-            obj.paRegisterActivity()
+        # if isinstance(obj, cls):
+        #     obj.paRegisterActivity()
         return obj
 
     def paRegisterActivity(self):
@@ -1688,6 +1814,16 @@ class ProgActivityAnimal(ProgActivity):
         objList = super().loadFromDB()
         if isinstance(objList, str):
             krnl_logger.error(f'ERR_DB_Access Error: Programmed Activities for class {cls.__name__} not loaded: {objList}')
+            return f'ERR_DB_Access Error: Programmed Activities for class {cls.__name__} not loaded: {objList}'
+        _ = [cls.paRegisterActivity(j) for j in objList]  # {paObj: __activityID, } Registers objects in class dict.
+        return bool(_)
+
+    @classmethod
+    def loadFromDB00(cls):
+        objList = super().loadFromDB()
+        if isinstance(objList, str):
+            krnl_logger.error(
+                f'ERR_DB_Access Error: Programmed Activities for class {cls.__name__} not loaded: {objList}')
             return f'ERR_DB_Access Error: Programmed Activities for class {cls.__name__} not loaded: {objList}'
         _ = [cls.paRegisterActivity(j) for j in objList]  # {paObj: __activityID, } Registers objects in class dict.
         return bool(_)

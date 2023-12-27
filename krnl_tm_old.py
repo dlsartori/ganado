@@ -1,7 +1,7 @@
 
 from krnl_config import time_mt, singleton, sessionActiveUser, callerFunction, lineNum, valiDate, os, activityEnableFull
 from krnl_transactionalObject import TransactionalObject
-from custom_types import DataTable, setupArgs, getRecords, setRecord, delRecord
+from krnl_custom_types import DataTable, setupArgs, getRecords, setRecord, delRecord
 from krnl_abstract_class_activity import Activity
 from krnl_parsing_functions import kwargsParseNames
 systemDefaultCurrency = 1       # 1=ARS

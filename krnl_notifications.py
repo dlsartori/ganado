@@ -1,7 +1,7 @@
 from krnl_cfg import *
 # from json import dumps, loads
 from threading import Event
-from custom_types import getRecords
+from krnl_custom_types import getRecords
 from krnl_parsing_functions import setRecord
 
 ACTIVITY_LOWER_LIMIT = 15

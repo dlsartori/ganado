@@ -1,9 +1,10 @@
 import sqlite3
 from krnl_exceptions import *
 import threading
+from json import JSONDecodeError
 from threading import Lock
 from collections import defaultdict
-from krnl_config import strError, callerFunction, lineNum, moduleName, uidCh, MAIN_DB_NAME, db_logger, \
+from krnl_config import strError, callerFunction, lineNum, moduleName, uidCh, MAIN_DB_NAME, db_logger, timerWrapper, \
     CLIENT_MIN_INDEX, CLIENT_MAX_INDEX, NEXT_BATCH_MIN_INDEX, NEXT_BATCH_MAX_INDEX, print, DISMISS_PRINT
 
 # tblNotFoundErrMsg = 'ERR_Sys_TableNotFound'
@@ -162,52 +163,39 @@ class SQLiteQuery(object):      # 1 solo objecto db _conn por thread. Usa thread
                 raise DBAccessError(f'{retValue} - {callerFunction(getCallers=True)}')
 
 
-    # @timerWrapper(iterations=50)   # range: 300 - 2300 usec (50 iterations)
+    # @timerWrapper(iterations=50)   # range: 300 - 2300 usec (50 iterations) - New version 23-Dec-23: 300-600 usec!
     def execute(self, strSQL='', params='', *, tbl=None, fldID_idx=None):
         """ Executes strSQL. Returns a cursor object or errorCode (str). This function for QUERY/DB Reads ONLY!!
-            Implements re-entry handling code to support re-entry from other threads in the time between the execution
-            of get_max_id() and the actual write to DB via the execute() command.
+            DO NOT attempt to write to DB with this function. Use SQLiteQueueDatabase class for writes.
         """
         if strSQL:
-            if tbl is not None and fldID_idx is not None:  # entra aqui solo en INSERT. NO SE USA INSERT aqui...
-                # TODO(cmt) Sacha-implementacion de escritura con SQLiteQuery. NO FUNCIONA CORRECTAMENTE: Usa locks para
-                #  obtener max_index correctamente PERO NO EVITA "database locked" errors si si intenta escribir en DB
-                #  cuando hay otra escritura en curso. Este bloque NO es usado ya que SQLiteQuery() objects se usan
-                #  solo para lectura. Se escribe con SqliteQueueDatabase.
-                params = list(params)
-                # with self.__lock:    # __lock asegura que durante reentrada 2 tbl_idx no terminen con los mismos valores
-                #     tbl_idx = self.__indicesDict.get(tbl)       # tbl_idx = None si la tabla no existe en __indicesDict
-                #     if tbl_idx is None:
-                #         tbl_idx = [None, 0, 0]   # Inicializa estruct. tbl_idx si tbl no existe aun en __indicesDict
-                #     tbl_idx[2] += 1                     # Incrementa reentryCounter.
-                #     self.__indicesDict[tbl] = tbl_idx   # Hace disponible reentryCounter para otros threads
-
-                max_idx = self._get_max_id(tbl)
-                if isinstance(max_idx, str):
-                    max_idx = f'ERR_SQLiteQuery {callerFunction()} Table Name error: {max_idx}'
-                    db_logger.error(max_idx)
-                    raise DBAccessError(f'DatabaseError Exception.{max_idx}; strSQL: {strSQL}')
-
-                params[fldID_idx] = max_idx + 1     # asigna a fldID max index de tbl + 1
-                # if tbl_idx[0] is None or tbl_idx[0] == max_id:
-                #     tbl_idx[1] = tbl_idx[2]  # Si ya hay 1 idx en __indicesDict (es reentrada) actualiza index counter
-                # tbl_idx[0] = max_id
-                # params[fldID_idx] = tbl_idx[0] + tbl_idx[1]  # Actualiza fldID en params.
-                # with self.__lock:  # lock porque la actualizacion de los campos de __indicesDict[tbl] DEBE ser atomica
-                # self.__indicesDict[tbl] = tbl_idx   # Documentacion dice que esta operacion ES atomica (D[x] = y)
-                # print(f'****** On entry __indicesDict = {self.__indicesDict[tbl]}', dismiss_status=DISMISS_PRINT)
+            # if tbl is not None and fldID_idx is not None:  # entra aqui solo en INSERT. NO SE USA INSERT aqui...
+            #     # TODO(cmt) Sacha-implementacion de escritura con SQLiteQuery. NO FUNCIONA CORRECTAMENTE: Usa locks para
+            #     #  obtener max_index correctamente PERO NO EVITA "database locked" errors si si intenta escribir en DB
+            #     #  cuando hay otra escritura en curso. Este bloque NO es usado ya que SQLiteQuery() objects se usan
+            #     #  solo para lectura. Se escribe con SqliteQueueDatabase.
+            #     #  TODO ESTO YA DEPRECADO Y NO SE USA MAS (tbl, fldID_idx) YA NO SE USAN. 01-DEC-23
+            #     params = list(params)
+            #     max_idx = self._get_max_id(tbl)
+            #     if isinstance(max_idx, str):
+            #         max_idx = f'ERR_SQLiteQuery {callerFunction()} Table Name error: {max_idx}'
+            #         db_logger.error(max_idx)
+            #         raise DBAccessError(f'DatabaseError Exception.{max_idx}; strSQL: {strSQL}')
+            #
+            #     params[fldID_idx] = max_idx + 1     # asigna a fldID max index de tbl + 1
 
             with self.__conn:
                 db_logger.debug(f'SQLiteQuery received query: {strSQL}')
                 try:
                     cur = self.__conn.execute(strSQL, params)
+                except (JSONDecodeError, ValueError) as e:
+                    cur = f"ERR_DB_Data type converter error (JSON, TIMESTAMP or GEO). Error: {e}; sql: {strSQL}"
                 except (sqlite3.Error, DBAccessError, Exception) as e:
                     cur = f'ERR_SQLiteQuery {callerFunction()} - error: {e}'
                     self.__conn.rollback()
                     db_logger.error(f'{cur}; strSQL: {strSQL}')
                     self.__conn.execute('PRAGMA OPTIMIZE; ')
                     raise DBAccessError(f'DatabaseError Exception.{cur}; strSQL: {strSQL}')
-
             return cur
         return None
 
@@ -358,9 +346,9 @@ queryObj = createDBConn()
 
 def reloadTables():
     qryObj = SQLiteQuery.getObject()  # Obtiene query object para el Thread llamador.
-    strSQL = f"SELECT Table_Key_Name, Table_Name, ID_Table, Bitmask_Table, Method_Name FROM '{SYS_TABLES_NAME}'"
+    strSQL = f"SELECT Table_Key_Name, Table_Name, ID_Table, Bitmask_Table, Methods FROM '{SYS_TABLES_NAME}'"
     try:
-        rows = qryObj.execute(strSQL).fetchall()  # fetchall() -> (tblName, tblIndex, isAutoIncrement, isWITHOUTROWID, table_bitmask, Method_Name)
+        rows = qryObj.execute(strSQL).fetchall()  # fetchall() -> (tblName, tblIndex, isAutoIncrement, isWITHOUTROWID, table_bitmask, Methods)
         if rows:
             retValue = None
         else:
@@ -407,17 +395,62 @@ def reloadTables():
                 raise sqlite3.DatabaseError(f'Cannot load data from {SYS_TABLES_NAME}. Error: {e}')
 
             # print(f'tblData({t}) / {colNames}: {pkFieldsIndices} /Auto Incr.:{getTblName.__sysTables[t][2]}')
+
+            # Updates tables_with_duplicates for table t.
+            # DBDuplicationMgr._update_tables_with_duplicates(t)
+
     with lock:
         getTblName.__sysTables = getTblName.__sysTablesCopy.copy()      # solo copia diccionarios dentro del lock.
+
+
     return True
 
     # ---------------------------------------------- End reloadTables ----------------------------------------
+
+
+class DBDuplicationMgr(object):
+    __tables_with_duplicates = set()
+
+    def __init__(self):
+        pass
+
+    @classmethod
+    def _update_tables_with_duplicates(cls, tbl: str = ''):
+        """Updates variable tables_with_duplicates with table tbl.
+            Meant for internal use only in this context. NO CHECKS made for the sake of efficiency.
+        """
+        if tbl and isinstance(tbl, str):
+            if any(strError in getFldName(tbl, j) for j in ('fldTimeStamp', 'fld_Duplication_Index')):
+            # if strError in (getFldName(tbl, j) for j in ('fldTimeStamp', 'fld_Duplication_Index')):
+                return
+            cls.__tables_with_duplicates.add(tbl)
+        return None
+
+
+    @classmethod
+    def get_tables_with_duplicates(cls):
+        """ Returns a set of tblNames for all the tables in the system that support duplicate records (as of today:
+        tblAnimales, tblCaravanas, tblDispositivos, tblPersonas and tblGeoEntidades
+        @return: set(), tbl_with_duplicates
+        """
+        return cls.__tables_with_duplicates
+
+
+    @classmethod
+    def _remove_from_tables_with_duplicates(cls, tbl: str = '', *, clear_all=False):
+        if tbl and isinstance(tbl, str):
+            DBDuplicationMgr.__tables_with_duplicates.discard(tbl)
+        if clear_all:
+            DBDuplicationMgr.__tables_with_duplicates.clear()
+
+# ------------------------- End class DBDuplicationMgr -----------------------------------------
+
 
 def getTblName(tbl: str = '', mode=0, *, reload=False, db_table_name=None):
     """
     Gets the name of a table by its keyname
             mode: O -> dbTblName (str)
-                  1 -> (dbTblName, tblIndex, isAutoIncrement, isWithoutROWID, tbl_bitmask, Method_Name) (tuple)
+                  1 -> (dbTblName, tblIndex, isAutoIncrement, isWithoutROWID, tbl_bitmask, Methods) (tuple)
                   db_table_name: returns tblName for the db_table_name provided. Ignores the other settings.
     @return: tableName (str), tuple (dbTblName, tblIndex, AutoIncrement, isWITHOUTROWID, tbl_bitmask) or errorCode (strError)
     """

@@ -1,7 +1,7 @@
 from krnl_config import time_mt, singleton, sessionActiveUser, callerFunction, lineNum, valiDate, os, krnl_logger, \
     activityEnableFull, print, DISMISS_PRINT, datetime_from_kwargs
 from krnl_entityObject import EntityObject
-from custom_types import DataTable, setupArgs, getRecords, setRecord, delRecord, Amount, Transaction,defaultCurrencyName
+from krnl_custom_types import DataTable, setupArgs, getRecords, setRecord, delRecord, Amount, Transaction,defaultCurrencyName
 from krnl_exceptions import DBAccessError
 from krnl_abstract_class_activity import Activity
 from krnl_person import Person

@@ -1,7 +1,7 @@
 import threading
 from krnl_config import *
 from datetime import timedelta
-from custom_types import DataTable, getRecords, setRecord, setupArgs, close_db_writes
+from krnl_custom_types import DataTable, getRecords, setRecord, setupArgs, close_db_writes
 # from krnl_sqlite import SQLiteQuery, getTableInfo
 from krnl_db_access import writeObj, init_db_replication_triggers, SqliteQueueDatabase, init_database
 from krnl_object_instantiation import loadItemsFromDB
@@ -147,8 +147,8 @@ if __name__ == "__main__":
     bovines[0].weaning.get()
 
     bovines[0].inventory.get()
-    close_db_writes()  # Flushes all buffers, writes all data to DB and suspends db write operations.
-    exit(0)
+    # close_db_writes()  # Flushes all buffers, writes all data to DB and suspends db write operations.
+    # exit(0)
 
 
     # TODO(cmt): Test creating some PA from dictionary data.
@@ -166,6 +166,7 @@ if __name__ == "__main__":
         # items_dict = {j: progDate for j in bovines if j.recordID in inventoryList}   fldFK_Localizacion
         paInventory = Bovine.paCreateActivity(paDataset.pop(0), *paDataset)
     else:
+        # Not creating new progActivities. Goes to set inventories for selected objects.
         horita = time_mt('datetime')
         print('                                  ######################## Localizations: ########################')
         for j in bovines:
