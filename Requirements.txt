@@ -1,0 +1,8 @@
+pyqt6
+psycopg2
+money
+ntplib
+deepdiff
+requests
+peewee
+setuptools
