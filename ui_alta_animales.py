@@ -1,3 +1,4 @@
+import datetime
 import sys
 from PyQt6 import QtCore, QtWidgets
 # https://stackoverflow.com/questions/52560496/getting-a-second-window-pass-a-variable-to-the-main-ui-and-close
@@ -6,6 +7,7 @@ from ui.IngresoAnimales import Ui_dlgIngresoAnimales
 from ui.IngresoAnimalesAdic import Ui_dlgIngresoAnimalesAdic
 from ui.IngresoAnimalesCaravanas import Ui_dlgIngresoAnimalesCaravanas
 from krnl_custom_types import DataTable, getRecords, dbRead
+from datetime import datetime, timedelta
 
 
 class UiAltaAnimales():
@@ -23,7 +25,7 @@ class UiAltaAnimales():
             dlgAlta.intMarca = dlgAlta.cboMarca.currentData()
             dlgAlta.blnPregn = dlgAlta.chkPreniez.isChecked()
             dlgAlta.strComentario = dlgAlta.pteComentario.toPlainText()
-            # TEMP
+            # TEMP dlgAlta
             print('Alta Animales:')
             print('    intTipoEntrada: ' + str(dlgAlta.intTipoEntrada))
             print('    intCategoria: ' + str(dlgAlta.intCategoria))
@@ -33,6 +35,17 @@ class UiAltaAnimales():
             print('    intMarca: ' + str(dlgAlta.intMarca))
             print('    blnPregn: ' + str(dlgAlta.blnPregn))
             print('    strComentario: ' + str(dlgAlta.strComentario))
+            # TEMP dlgAdic
+            print('Adicional:')
+            print('    qdtFechaNac: ' + str(dlgAlta.qdtFechaNac))
+            print('    qdtFechaDestete: ' + str(dlgAlta.qdtFechaDestete))
+            print('    qdtFechaServ: ' + str(dlgAlta.qdtFechaServ))
+            print('    dblPeso: ' + str(dlgAlta.dblPeso))
+            print('    intLote: ' + str(dlgAlta.intLote))
+            print('    intPotrero: ' + str(dlgAlta.intPotrero))
+            print('    intLocacion: ' + str(dlgAlta.intLocacion))
+            print('    blnTratamientos: ' + str(dlgAlta.blnTratamientos))
+            print('    blnDieta: ' + str(dlgAlta.blnDieta))
         else:
             print('Rejected')
 
@@ -52,10 +65,10 @@ class DialogAltaAnimales(QtWidgets.QDialog, Ui_dlgIngresoAnimales):
         self.blnPregn = True  # YA
         self.strComentario = '' # YA
         self.lstIdCaravanas = []
-        self.qdtFechaNac = None
-        self.qdtFechaDestete = None
-        self.qdtFechaServ = None
-        self.dblPeso = 50.0
+        self.qdtFechaNac = QtCore.QDate.currentDate().addMonths(-24)
+        self.qdtFechaDestete = QtCore.QDate.currentDate().addMonths(-18)
+        self.qdtFechaServ = QtCore.QDate.currentDate().addMonths(-3)
+        self.dblPeso = 150.0
         self.intLote = 1
         self.intPotrero = 1
         self.intLocacion = 1
@@ -109,6 +122,10 @@ class DialogAltaAnimales(QtWidgets.QDialog, Ui_dlgIngresoAnimales):
 
     def dialogAdic(self):   # show additional information dialog
         dlgAdic = DialogAltaAnimalesAdic()
+        # populate controls
+        dlgAdic.datNacimiento.setDate(self.qdtFechaNac)
+        dlgAdic.datDestete.setDate(self.qdtFechaDestete)
+        dlgAdic.datServicio.setDate(self.qdtFechaServ)
         self.currentFarm = self.cboEstablecimiento.currentData()
         if self.currentFarm == '2':
             self.currentFarmUID = None
@@ -124,28 +141,32 @@ class DialogAltaAnimales(QtWidgets.QDialog, Ui_dlgIngresoAnimales):
             dlgAdic.cboLote.setEnabled(True)
             for item, intId in self.lstLotes:
                 dlgAdic.cboLote.addItem(item, str(intId))
-        # dlgAdic.cboPotrero.setEnabled(False)
-        # dlgAdic.cboLocacion.setEnabled(False)
         dlgAdic.dspPeso.setValue(self.dblPeso)
 
         # additional signals & slots
 
+        # run dialog
         if dlgAdic.exec() == QtWidgets.QDialog.DialogCode.Accepted:
-            self.qdtFechaNac = None
-            self.qdtFechaDestete = None
-            self.qdtFechaServ = None
+            # set result variables
+            self.qdtFechaNac = dlgAdic.datNacimiento.date()
+            self.qdtFechaDestete = dlgAdic.datDestete.date()
+            self.qdtFechaServ = dlgAdic.datServicio.date()
             self.dblPeso = dlgAdic.dspPeso.value()
-            self.intLote = 1
-            self.intPotrero = 1
-            self.intLocacion = 1
-            self.blnTratamientos = False
-            self.blnDieta = False
+            self.intLote = dlgAdic.cboLote.currentData()
+            self.intPotrero = dlgAdic.cboPotrero.currentData()
+            self.intLocacion = dlgAdic.cboLocacion.currentData()
+            self.blnTratamientos = dlgAdic.chkTratamientos.isChecked()
+            self.blnDieta = dlgAdic.chkDieta.isChecked()
             print('Accepted')
         else:
             print('Rejected')
 
     def dialogCaravanas(self):  # show tag selection dialog
         dlgCaravanas = DialogAltaAnimalesCaravanas()
+
+        # additional signals & slots
+
+        # run dialog
         if dlgCaravanas.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             print('Accepted')
             self.lstIdCaravanas = []
@@ -179,7 +200,7 @@ class DialogAltaAnimalesAdic(QtWidgets.QDialog, Ui_dlgIngresoAnimalesAdic):
             self.currentFieldUID = dbRead('tblGeoEntidades',
                                          f'SELECT "UID_Objeto" FROM "Geo Entidades" WHERE "ID_GeoEntidad" = {self.currentField}',
                                          0).dataList[0][0]
-            # create lists of values for 'cboLote' combo box
+            # create lists of values for combo boxes
             self.lstPotreros = dbRead('tblGeoEntidades',
                                    f'SELECT "Nombre Entidad", "ID_GeoEntidad" FROM "Geo Entidades"'
                                    f' WHERE "ID_Nivel De Localizacion" = 60 AND "Containers" LIKE "%{self.currentFieldUID}%"'
@@ -188,6 +209,7 @@ class DialogAltaAnimalesAdic(QtWidgets.QDialog, Ui_dlgIngresoAnimalesAdic):
                                    f'SELECT "Nombre Entidad", "ID_GeoEntidad" FROM "Geo Entidades"'
                                    f' WHERE "ID_Nivel De Localizacion" = 70 AND "Containers" LIKE "%{self.currentFieldUID}%"'
                                    f' ORDER BY "Nombre Entidad"', 0).dataList
+            # populate combo boxes
             if self.lstPotreros == []:
                 self.cboPotrero.clear()
                 self.cboPotrero.setEnabled(False)
