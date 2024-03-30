@@ -1,6 +1,7 @@
 *.rar
 *.zip
 *.log
+*.log.*
 *.db-shm
 *.db-wal
 *.1

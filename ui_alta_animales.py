@@ -21,6 +21,8 @@ class UiAltaAnimales():
             dlgAlta.intEstablecimiento = dlgAlta.cboEstablecimiento.currentData()
             dlgAlta.intDuenio = dlgAlta.cboDuenio.currentData()
             dlgAlta.intMarca = dlgAlta.cboMarca.currentData()
+            dlgAlta.blnPregn = dlgAlta.chkPreniez.isChecked()
+            dlgAlta.strComentario = dlgAlta.pteComentario.toPlainText()
             # TEMP
             print('Alta Animales:')
             print('    intTipoEntrada: ' + str(dlgAlta.intTipoEntrada))
@@ -29,6 +31,8 @@ class UiAltaAnimales():
             print('    intEstablecimiento: ' + str(dlgAlta.intEstablecimiento))
             print('    intDuenio: ' + str(dlgAlta.intDuenio))
             print('    intMarca: ' + str(dlgAlta.intMarca))
+            print('    blnPregn: ' + str(dlgAlta.blnPregn))
+            print('    strComentario: ' + str(dlgAlta.strComentario))
         else:
             print('Rejected')
 
@@ -39,14 +43,14 @@ class DialogAltaAnimales(QtWidgets.QDialog, Ui_dlgIngresoAnimales):
         self.setupUi(self)
 
         # initialize result variables
-        self.intTipoEntrada = 1
-        self.intCategoria = 1
-        self.intRaza = 1
-        self.intEstablecimiento = 1
-        self.intDuenio = 1
-        self.intMarca = 1
-        self.blnPregn = True
-        self.strComentario = ''
+        self.intTipoEntrada = 1  # YA
+        self.intCategoria = 1  # YA
+        self.intRaza = 1  # YA
+        self.intEstablecimiento = 1  # YA
+        self.intDuenio = 1  # YA
+        self.intMarca = 1  # YA
+        self.blnPregn = True  # YA
+        self.strComentario = '' # YA
         self.lstIdCaravanas = []
         self.qdtFechaNac = None
         self.qdtFechaDestete = None
@@ -86,7 +90,7 @@ class DialogAltaAnimales(QtWidgets.QDialog, Ui_dlgIngresoAnimales):
         for item, intId in self.lstRazas:
             self.cboRaza.addItem(item, str(intId))
         for item, intId in self.lstEstablecimientos:
-            if intId == 2:
+            if intId == 2:  # Establecimiento nulo
                 item = '----'
             self.cboEstablecimiento.addItem(item, str(intId))
         self.nullFarmIdx = self.cboEstablecimiento.findText('----')
@@ -115,13 +119,13 @@ class DialogAltaAnimales(QtWidgets.QDialog, Ui_dlgIngresoAnimales):
             # create lists of values for 'cboLote' combo box
             self.lstLotes = dbRead('tblGeoEntidades',
                                    f'SELECT "Nombre Entidad", "ID_GeoEntidad" FROM "Geo Entidades"'
-                                   f' WHERE "ID_Nivel De Localizacion" = 50 AND "Containers" = \'"{self.currentFarmUID}"\''
+                                   f' WHERE "ID_Nivel De Localizacion" = 50 AND "Containers" LIKE "%{self.currentFarmUID}%"'
                                    f' ORDER BY "Nombre Entidad"', 0).dataList
             dlgAdic.cboLote.setEnabled(True)
             for item, intId in self.lstLotes:
                 dlgAdic.cboLote.addItem(item, str(intId))
-        dlgAdic.cboPotrero.setEnabled(False)
-        dlgAdic.cboLocacion.setEnabled(False)
+        # dlgAdic.cboPotrero.setEnabled(False)
+        # dlgAdic.cboLocacion.setEnabled(False)
         dlgAdic.dspPeso.setValue(self.dblPeso)
 
         # additional signals & slots
@@ -154,9 +158,51 @@ class DialogAltaAnimalesAdic(QtWidgets.QDialog, Ui_dlgIngresoAnimalesAdic):
         super().__init__(parent)
         self.setupUi(self)
 
+        self.currentField = None
+        self.currentPotrero = None
+        self.currentLocacion = None
+        self.cboPotrero.setEnabled(False)
+        self.cboLocacion.setEnabled(False)
+
         # signals & slots
         self.btnOk.clicked.connect(self.accept)
         self.btnCancel.clicked.connect(self.reject)
+        self.cboLote.currentIndexChanged.connect(self.loteChanged)  # si hay un valor en cboLote, se ejecuta al cargar
+
+
+    def loteChanged(self):
+        # Si el lote elegido tiene potreros, habilitar el combo cboPotrero y cargar los items
+        # Si el lote elegido tiene locaciones, habilitar el combo cboLocacion y cargar los items
+        self.currentField = self.cboLote.currentData()
+        if self.currentField:
+            self.cboPotrero.clear()
+            self.currentFieldUID = dbRead('tblGeoEntidades',
+                                         f'SELECT "UID_Objeto" FROM "Geo Entidades" WHERE "ID_GeoEntidad" = {self.currentField}',
+                                         0).dataList[0][0]
+            # create lists of values for 'cboLote' combo box
+            self.lstPotreros = dbRead('tblGeoEntidades',
+                                   f'SELECT "Nombre Entidad", "ID_GeoEntidad" FROM "Geo Entidades"'
+                                   f' WHERE "ID_Nivel De Localizacion" = 60 AND "Containers" LIKE "%{self.currentFieldUID}%"'
+                                   f' ORDER BY "Nombre Entidad"', 0).dataList
+            self.lstLocaciones = dbRead('tblGeoEntidades',
+                                   f'SELECT "Nombre Entidad", "ID_GeoEntidad" FROM "Geo Entidades"'
+                                   f' WHERE "ID_Nivel De Localizacion" = 70 AND "Containers" LIKE "%{self.currentFieldUID}%"'
+                                   f' ORDER BY "Nombre Entidad"', 0).dataList
+            if self.lstPotreros == []:
+                self.cboPotrero.clear()
+                self.cboPotrero.setEnabled(False)
+            else:
+                for item, intId in self.lstPotreros:
+                    self.cboPotrero.addItem(item, str(intId))
+                self.cboPotrero.setEnabled(True)
+            if self.lstLocaciones == []:
+                self.cboLocacion.clear()
+                self.cboLocacion.setEnabled(False)
+            else:
+                for item, intId in self.lstLocaciones:
+                    self.cboLocacion.addItem(item, str(intId))
+                self.cboLocacion.setEnabled(True)
+
 
 
 class DialogAltaAnimalesCaravanas(QtWidgets.QDialog, Ui_dlgIngresoAnimalesCaravanas):
