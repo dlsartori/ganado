@@ -1,0 +1,919 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>dlgIngresoAnimales</class>
+ <widget class="QDialog" name="dlgIngresoAnimales">
+  <property name="enabled">
+   <bool>true</bool>
+  </property>
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>482</width>
+    <height>281</height>
+   </rect>
+  </property>
+  <property name="baseSize">
+   <size>
+    <width>7</width>
+    <height>0</height>
+   </size>
+  </property>
+  <property name="windowTitle">
+   <string>Ingreso de Animales</string>
+  </property>
+  <property name="windowIcon">
+   <iconset>
+    <normaloff>Ganado.ico</normaloff>Ganado.ico</iconset>
+  </property>
+  <widget class="QTabWidget" name="tabWidget">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>10</y>
+     <width>461</width>
+     <height>231</height>
+    </rect>
+   </property>
+   <property name="currentIndex">
+    <number>2</number>
+   </property>
+   <widget class="QWidget" name="tab1">
+    <attribute name="title">
+     <string>Principal</string>
+    </attribute>
+    <widget class="QLabel" name="lblEstablecimiento">
+     <property name="geometry">
+      <rect>
+       <x>230</x>
+       <y>61</y>
+       <width>90</width>
+       <height>13</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>* &amp;Establecimiento</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+     </property>
+     <property name="buddy">
+      <cstring>cboEstablecimiento</cstring>
+     </property>
+    </widget>
+    <widget class="QPlainTextEdit" name="pteComentario">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>117</y>
+       <width>434</width>
+       <height>80</height>
+      </rect>
+     </property>
+     <property name="tabChangesFocus">
+      <bool>true</bool>
+     </property>
+     <property name="plainText">
+      <string/>
+     </property>
+    </widget>
+    <widget class="ComboTabla" name="cboMarca">
+     <property name="geometry">
+      <rect>
+       <x>323</x>
+       <y>33</y>
+       <width>121</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="ComboTabla" name="cboEstablecimiento">
+     <property name="geometry">
+      <rect>
+       <x>323</x>
+       <y>58</y>
+       <width>121</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLabel" name="lblRaza">
+     <property name="geometry">
+      <rect>
+       <x>4</x>
+       <y>36</y>
+       <width>90</width>
+       <height>13</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>* &amp;Raza</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+     </property>
+     <property name="buddy">
+      <cstring>cboRaza</cstring>
+     </property>
+    </widget>
+    <widget class="QLabel" name="lblCategoria">
+     <property name="geometry">
+      <rect>
+       <x>5</x>
+       <y>61</y>
+       <width>90</width>
+       <height>13</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>* Cate&amp;goría</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+     </property>
+     <property name="buddy">
+      <cstring>cboCategoria</cstring>
+     </property>
+    </widget>
+    <widget class="ComboTabla" name="cboTipoDeEntrada">
+     <property name="geometry">
+      <rect>
+       <x>98</x>
+       <y>8</y>
+       <width>121</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLabel" name="lblMarca">
+     <property name="geometry">
+      <rect>
+       <x>229</x>
+       <y>36</y>
+       <width>90</width>
+       <height>13</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&amp;Marca</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+     </property>
+     <property name="buddy">
+      <cstring>cboMarca</cstring>
+     </property>
+    </widget>
+    <widget class="QLabel" name="lblComentario">
+     <property name="geometry">
+      <rect>
+       <x>12</x>
+       <y>98</y>
+       <width>71</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>C&amp;omentarios</string>
+     </property>
+     <property name="buddy">
+      <cstring>pteComentario</cstring>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="chkPreniez">
+     <property name="enabled">
+      <bool>true</bool>
+     </property>
+     <property name="geometry">
+      <rect>
+       <x>98</x>
+       <y>84</y>
+       <width>70</width>
+       <height>17</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Pre&amp;ñada</string>
+     </property>
+    </widget>
+    <widget class="ComboTabla" name="cboDuenio">
+     <property name="geometry">
+      <rect>
+       <x>323</x>
+       <y>8</y>
+       <width>121</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="ComboTabla" name="cboRaza">
+     <property name="geometry">
+      <rect>
+       <x>98</x>
+       <y>33</y>
+       <width>121</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="ComboTabla" name="cboCategoria">
+     <property name="geometry">
+      <rect>
+       <x>98</x>
+       <y>58</y>
+       <width>121</width>
+       <height>20</height>
+      </rect>
+     </property>
+    </widget>
+    <widget class="QLabel" name="lblDuenio">
+     <property name="geometry">
+      <rect>
+       <x>227</x>
+       <y>10</y>
+       <width>90</width>
+       <height>13</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&amp;Dueño</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+     </property>
+     <property name="buddy">
+      <cstring>cboDuenio</cstring>
+     </property>
+    </widget>
+    <widget class="QLabel" name="lblTipoDeEntrada">
+     <property name="geometry">
+      <rect>
+       <x>5</x>
+       <y>10</y>
+       <width>90</width>
+       <height>13</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>* &amp;Tipo de Entrada</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+     </property>
+     <property name="buddy">
+      <cstring>cboTipoDeEntrada</cstring>
+     </property>
+    </widget>
+   </widget>
+   <widget class="QWidget" name="tab2">
+    <attribute name="title">
+     <string>Identificación</string>
+    </attribute>
+    <widget class="QLabel" name="lblSelLeft">
+     <property name="geometry">
+      <rect>
+       <x>15</x>
+       <y>21</y>
+       <width>136</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&amp;Seleccionar Caravana</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
+     </property>
+     <property name="buddy">
+      <cstring>tableViewLeft</cstring>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="btnNewTag">
+     <property name="geometry">
+      <rect>
+       <x>12</x>
+       <y>175</y>
+       <width>151</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&amp;Ingresar Nueva Caravana ...</string>
+     </property>
+     <property name="default">
+      <bool>false</bool>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="txtBuscar">
+     <property name="enabled">
+      <bool>false</bool>
+     </property>
+     <property name="geometry">
+      <rect>
+       <x>166</x>
+       <y>5</y>
+       <width>71</width>
+       <height>20</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string/>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="btnToRight">
+     <property name="geometry">
+      <rect>
+       <x>210</x>
+       <y>90</y>
+       <width>30</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&gt;</string>
+     </property>
+     <property name="default">
+      <bool>false</bool>
+     </property>
+    </widget>
+    <widget class="QLabel" name="lblSelRight">
+     <property name="geometry">
+      <rect>
+       <x>250</x>
+       <y>21</y>
+       <width>136</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&amp;Caravanas Seleccionadas</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
+     </property>
+     <property name="buddy">
+      <cstring>tableViewRight</cstring>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="btnToLeft">
+     <property name="geometry">
+      <rect>
+       <x>210</x>
+       <y>115</y>
+       <width>30</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&lt;</string>
+     </property>
+     <property name="default">
+      <bool>false</bool>
+     </property>
+    </widget>
+    <widget class="QTableView" name="tableViewRight">
+     <property name="geometry">
+      <rect>
+       <x>250</x>
+       <y>38</y>
+       <width>191</width>
+       <height>133</height>
+      </rect>
+     </property>
+     <property name="font">
+      <font>
+       <pointsize>8</pointsize>
+      </font>
+     </property>
+     <property name="tabKeyNavigation">
+      <bool>false</bool>
+     </property>
+     <property name="selectionMode">
+      <enum>QAbstractItemView::ExtendedSelection</enum>
+     </property>
+     <property name="selectionBehavior">
+      <enum>QAbstractItemView::SelectRows</enum>
+     </property>
+     <property name="showGrid">
+      <bool>false</bool>
+     </property>
+     <property name="gridStyle">
+      <enum>Qt::NoPen</enum>
+     </property>
+     <attribute name="horizontalHeaderVisible">
+      <bool>true</bool>
+     </attribute>
+     <attribute name="horizontalHeaderStretchLastSection">
+      <bool>true</bool>
+     </attribute>
+     <attribute name="verticalHeaderVisible">
+      <bool>false</bool>
+     </attribute>
+     <attribute name="verticalHeaderMinimumSectionSize">
+      <number>10</number>
+     </attribute>
+     <attribute name="verticalHeaderDefaultSectionSize">
+      <number>15</number>
+     </attribute>
+    </widget>
+    <widget class="QLabel" name="lblBuscar">
+     <property name="enabled">
+      <bool>false</bool>
+     </property>
+     <property name="geometry">
+      <rect>
+       <x>123</x>
+       <y>8</y>
+       <width>41</width>
+       <height>13</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&amp;Buscar</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+     </property>
+     <property name="buddy">
+      <cstring>txtBuscar</cstring>
+     </property>
+    </widget>
+    <widget class="QTableView" name="tableViewLeft">
+     <property name="geometry">
+      <rect>
+       <x>13</x>
+       <y>38</y>
+       <width>191</width>
+       <height>133</height>
+      </rect>
+     </property>
+     <property name="font">
+      <font>
+       <pointsize>8</pointsize>
+      </font>
+     </property>
+     <property name="tabKeyNavigation">
+      <bool>false</bool>
+     </property>
+     <property name="selectionMode">
+      <enum>QAbstractItemView::ExtendedSelection</enum>
+     </property>
+     <property name="selectionBehavior">
+      <enum>QAbstractItemView::SelectRows</enum>
+     </property>
+     <property name="showGrid">
+      <bool>false</bool>
+     </property>
+     <property name="gridStyle">
+      <enum>Qt::NoPen</enum>
+     </property>
+     <attribute name="horizontalHeaderVisible">
+      <bool>true</bool>
+     </attribute>
+     <attribute name="horizontalHeaderStretchLastSection">
+      <bool>true</bool>
+     </attribute>
+     <attribute name="verticalHeaderVisible">
+      <bool>false</bool>
+     </attribute>
+     <attribute name="verticalHeaderMinimumSectionSize">
+      <number>10</number>
+     </attribute>
+     <attribute name="verticalHeaderDefaultSectionSize">
+      <number>15</number>
+     </attribute>
+     <attribute name="verticalHeaderStretchLastSection">
+      <bool>false</bool>
+     </attribute>
+    </widget>
+    <widget class="QPushButton" name="btnOtros">
+     <property name="geometry">
+      <rect>
+       <x>320</x>
+       <y>175</y>
+       <width>121</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>* &amp;Otras señas ...</string>
+     </property>
+    </widget>
+   </widget>
+   <widget class="QWidget" name="tab3">
+    <attribute name="title">
+     <string>Adicional</string>
+    </attribute>
+    <widget class="QLabel" name="lblFechaServicio">
+     <property name="geometry">
+      <rect>
+       <x>30</x>
+       <y>110</y>
+       <width>111</width>
+       <height>30</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Entrada en &amp;Servicio</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+     </property>
+     <property name="buddy">
+      <cstring>datServicio</cstring>
+     </property>
+    </widget>
+    <widget class="QDateEdit" name="datServicio">
+     <property name="geometry">
+      <rect>
+       <x>146</x>
+       <y>115</y>
+       <width>76</width>
+       <height>20</height>
+      </rect>
+     </property>
+     <property name="dateTime">
+      <datetime>
+       <hour>0</hour>
+       <minute>0</minute>
+       <second>0</second>
+       <year>2021</year>
+       <month>1</month>
+       <day>1</day>
+      </datetime>
+     </property>
+     <property name="displayFormat">
+      <string>d/M/yyyy</string>
+     </property>
+     <property name="calendarPopup">
+      <bool>true</bool>
+     </property>
+    </widget>
+    <widget class="QDoubleSpinBox" name="dspPeso">
+     <property name="enabled">
+      <bool>true</bool>
+     </property>
+     <property name="geometry">
+      <rect>
+       <x>146</x>
+       <y>140</y>
+       <width>76</width>
+       <height>20</height>
+      </rect>
+     </property>
+     <property name="buttonSymbols">
+      <enum>QAbstractSpinBox::NoButtons</enum>
+     </property>
+     <property name="decimals">
+      <number>1</number>
+     </property>
+     <property name="minimum">
+      <double>50.000000000000000</double>
+     </property>
+     <property name="maximum">
+      <double>999.000000000000000</double>
+     </property>
+    </widget>
+    <widget class="QLabel" name="lblFechaDestete">
+     <property name="geometry">
+      <rect>
+       <x>30</x>
+       <y>90</y>
+       <width>111</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>&amp;Destete</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+     </property>
+     <property name="buddy">
+      <cstring>datDestete</cstring>
+     </property>
+    </widget>
+    <widget class="QDateEdit" name="datDestete">
+     <property name="geometry">
+      <rect>
+       <x>146</x>
+       <y>90</y>
+       <width>76</width>
+       <height>20</height>
+      </rect>
+     </property>
+     <property name="dateTime">
+      <datetime>
+       <hour>0</hour>
+       <minute>0</minute>
+       <second>0</second>
+       <year>2021</year>
+       <month>1</month>
+       <day>1</day>
+      </datetime>
+     </property>
+     <property name="displayFormat">
+      <string>d/M/yyyy</string>
+     </property>
+     <property name="calendarPopup">
+      <bool>true</bool>
+     </property>
+    </widget>
+    <widget class="QLabel" name="lblPeso">
+     <property name="geometry">
+      <rect>
+       <x>52</x>
+       <y>140</y>
+       <width>90</width>
+       <height>17</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Peso en &amp;Kg.</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+     </property>
+     <property name="buddy">
+      <cstring>dspPeso</cstring>
+     </property>
+    </widget>
+    <widget class="QGroupBox" name="grpEdad">
+     <property name="enabled">
+      <bool>true</bool>
+     </property>
+     <property name="geometry">
+      <rect>
+       <x>5</x>
+       <y>10</y>
+       <width>226</width>
+       <height>76</height>
+      </rect>
+     </property>
+     <property name="title">
+      <string>Edad del Animal</string>
+     </property>
+     <widget class="QDateEdit" name="datNacimiento">
+      <property name="geometry">
+       <rect>
+        <x>140</x>
+        <y>20</y>
+        <width>76</width>
+        <height>20</height>
+       </rect>
+      </property>
+      <property name="dateTime">
+       <datetime>
+        <hour>0</hour>
+        <minute>0</minute>
+        <second>0</second>
+        <year>2021</year>
+        <month>1</month>
+        <day>1</day>
+       </datetime>
+      </property>
+      <property name="displayFormat">
+       <string>d/M/yyyy</string>
+      </property>
+      <property name="calendarPopup">
+       <bool>true</bool>
+      </property>
+     </widget>
+     <widget class="QRadioButton" name="radFechaNacimiento">
+      <property name="geometry">
+       <rect>
+        <x>15</x>
+        <y>22</y>
+        <width>121</width>
+        <height>17</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>&amp;Fecha de Nacimiento</string>
+      </property>
+      <property name="checked">
+       <bool>true</bool>
+      </property>
+     </widget>
+     <widget class="QRadioButton" name="radEdad">
+      <property name="geometry">
+       <rect>
+        <x>15</x>
+        <y>45</y>
+        <width>96</width>
+        <height>17</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>&amp;Edad (años)</string>
+      </property>
+     </widget>
+     <widget class="QDoubleSpinBox" name="dspEdad">
+      <property name="enabled">
+       <bool>false</bool>
+      </property>
+      <property name="geometry">
+       <rect>
+        <x>140</x>
+        <y>45</y>
+        <width>76</width>
+        <height>20</height>
+       </rect>
+      </property>
+      <property name="decimals">
+       <number>1</number>
+      </property>
+     </widget>
+    </widget>
+    <widget class="QGroupBox" name="grpUbicacion">
+     <property name="enabled">
+      <bool>true</bool>
+     </property>
+     <property name="geometry">
+      <rect>
+       <x>240</x>
+       <y>10</y>
+       <width>201</width>
+       <height>106</height>
+      </rect>
+     </property>
+     <property name="title">
+      <string>Ubicación</string>
+     </property>
+     <widget class="ComboTabla" name="cboPotrero">
+      <property name="enabled">
+       <bool>true</bool>
+      </property>
+      <property name="geometry">
+       <rect>
+        <x>70</x>
+        <y>47</y>
+        <width>121</width>
+        <height>20</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QLabel" name="lblLote">
+      <property name="geometry">
+       <rect>
+        <x>20</x>
+        <y>22</y>
+        <width>46</width>
+        <height>13</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>&amp;Lote</string>
+      </property>
+      <property name="alignment">
+       <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+      </property>
+      <property name="buddy">
+       <cstring>cboLote</cstring>
+      </property>
+     </widget>
+     <widget class="ComboTabla" name="cboLote">
+      <property name="enabled">
+       <bool>true</bool>
+      </property>
+      <property name="geometry">
+       <rect>
+        <x>70</x>
+        <y>20</y>
+        <width>121</width>
+        <height>20</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QLabel" name="lblPotrero">
+      <property name="geometry">
+       <rect>
+        <x>20</x>
+        <y>48</y>
+        <width>46</width>
+        <height>13</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>&amp;Potrero</string>
+      </property>
+      <property name="alignment">
+       <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+      </property>
+      <property name="buddy">
+       <cstring>cboPotrero</cstring>
+      </property>
+     </widget>
+     <widget class="ComboTabla" name="cboLocacion">
+      <property name="enabled">
+       <bool>true</bool>
+      </property>
+      <property name="geometry">
+       <rect>
+        <x>70</x>
+        <y>75</y>
+        <width>121</width>
+        <height>20</height>
+       </rect>
+      </property>
+     </widget>
+     <widget class="QLabel" name="lblLocacion">
+      <property name="geometry">
+       <rect>
+        <x>15</x>
+        <y>75</y>
+        <width>51</width>
+        <height>20</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Loca&amp;ción</string>
+      </property>
+      <property name="alignment">
+       <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+      </property>
+      <property name="buddy">
+       <cstring>cboLocacion</cstring>
+      </property>
+     </widget>
+    </widget>
+    <widget class="QCheckBox" name="chkDieta">
+     <property name="geometry">
+      <rect>
+       <x>250</x>
+       <y>140</y>
+       <width>166</width>
+       <height>17</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Asignar D&amp;ieta</string>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="chkTratamientos">
+     <property name="geometry">
+      <rect>
+       <x>250</x>
+       <y>120</y>
+       <width>166</width>
+       <height>17</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Asignar &amp;Tratamientos</string>
+     </property>
+    </widget>
+   </widget>
+  </widget>
+  <widget class="QPushButton" name="btnCancel">
+   <property name="geometry">
+    <rect>
+     <x>310</x>
+     <y>250</y>
+     <width>76</width>
+     <height>23</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>Cancelar</string>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="btnOk">
+   <property name="geometry">
+    <rect>
+     <x>395</x>
+     <y>250</y>
+     <width>76</width>
+     <height>23</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>Aceptar</string>
+   </property>
+   <property name="default">
+    <bool>true</bool>
+   </property>
+  </widget>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>ComboTabla</class>
+   <extends>QComboBox</extends>
+   <header>ui.comboTabla</header>
+  </customwidget>
+ </customwidgets>
+ <tabstops>
+  <tabstop>cboTipoDeEntrada</tabstop>
+  <tabstop>cboCategoria</tabstop>
+  <tabstop>chkPreniez</tabstop>
+  <tabstop>cboRaza</tabstop>
+  <tabstop>cboEstablecimiento</tabstop>
+  <tabstop>cboDuenio</tabstop>
+  <tabstop>cboMarca</tabstop>
+  <tabstop>pteComentario</tabstop>
+  <tabstop>btnCancel</tabstop>
+  <tabstop>btnOk</tabstop>
+ </tabstops>
+ <resources/>
+ <connections/>
+</ui>
