@@ -86,7 +86,7 @@ class BovineFactory(AnimalFactory):     # Concrete Factory #2.TODO(cmt): Se va a
         else:
             # CREA OBJETOS en base a animalKind:
             if valiDate(dob, None) is None:
-                dob = Bovine.generateDOB('Vacuno', kwargs['categoryName'])  # Genera DOB si no se pasa en kwargs.
+                dob = Bovine.generateDOB(kwargs['categoryName'])  # Genera DOB si no se pasa en kwargs.
                 dob = datetime.strftime(dob, fDateTime)
             kwargs['fldDOB'] = dob
             if not next((j for j in kwargs if j.lower().__contains__('category')), None):

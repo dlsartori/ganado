@@ -5,7 +5,7 @@ import threading
 MAIN_DB_NAME = "GanadoSQLite.db"
 
 if __name__ == '__main__':
-    writeObj = SqliteQueueDatabase(MAIN_DB_NAME, autostart=True)
+    writeObj = SqliteQueueDatabase(db_name=MAIN_DB_NAME, autostart=True)
     writeObj.start()
     writeObj.pause()
     print(f'Threads: {threading.enumerate()}')

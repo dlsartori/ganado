@@ -12,5 +12,6 @@ class AssetItem(Asset):
     __objClass = 20
     __objType = 1
 
-    def __init__(self, ID_Obj, isValid, activeAccess, *args, **kwargs):
-        Asset.__init__(self, ID_Obj, isValid, activeAccess, *args, **kwargs)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Asset.__init__(self, *args, **kwargs)

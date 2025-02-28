@@ -1,5 +1,5 @@
 from krnl_config import print, DISMISS_PRINT
-from krnl_geo_new import Geo
+from krnl_geo import Geo
 
 
 if __name__ == '__main__':

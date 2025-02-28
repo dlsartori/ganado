@@ -1,0 +1,10 @@
+import pandas as pd
+import numpy as np
+import itertools as it
+import krnl_db_query
+from krnl_db_query import SQLiteQuery
+sqlAnimales = 'SELECT * From Animales WHERE "Salida YN" == 0 OR "Salida YN" IS NULL; '
+dfAnimales = pd.read_sql_query(sqlAnimales, SQLiteQuery().conn)
+df = dfAnimales.copy()
+
+

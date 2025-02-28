@@ -1,17 +1,16 @@
 from krnl_cfg import *
 from krnl_custom_types import DataTable, getRecords, setupArgs
-from krnl_sqlite import SQLiteQuery, getTableInfo
+from krnl_db_query import SQLiteQuery, getTableInfo
 # from krnl_cfg import moduleName, callerFunction
 # from operator import attrgetter
-from krnl_parsing_functions import writeObj, setRecord
+from krnl_db_access import writeObj
 from krnl_object_instantiation import loadItemsFromDB
 from krnl_bovine import Bovine
 # from krnl_bovine_activity import BovineActivity
-# from krnl_animal import Animal
-from time import sleep
+
 from krnl_animal_activity import AnimalActivity, ProgActivityAnimal
 from krnl_abstract_class_prog_activity import ActivityTrigger
-from krnl_geo_new import handlerGeo, Geo
+from krnl_geo import Geo
 # from krnl_abstract_class_activity import Activity
 # from fibooks import info, balance_sheet, income_statement, excel_parser, other
 

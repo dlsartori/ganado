@@ -1,542 +1,686 @@
-from krnl_config import fDateTime, strError, sessionActiveUser, callerFunction, time_mt, \
-    lineNum, valiDate, removeAccents, os, singleton, krnl_logger, print, DISMISS_PRINT
-from krnl_custom_types import setupArgs, getRecords, setRecord, delRecord
+import sqlite3
+import re
+from threading import Lock
+import pandas as pd
+import numpy as np
+from krnl_config import sessionActiveUser, callerFunction, time_mt, lineNum, removeAccents, os, krnl_logger
+from krnl_custom_types import getRecords, setRecord, dbRead, DataTable, getFldName
+from krnl_db_query import getTblName, SQLiteQuery
+from datetime import datetime
+from uuid import uuid4, UUID
+from krnl_exceptions import DBAccessError
 from krnl_transactionalObject import TransactionalObject
-from krnl_custom_types import DataTable
 
 def moduleName():
     return str(os.path.basename(__file__))
 
-# @singleton
+def adapt_geo_to_UID(obj):
+    """ 'Serializes' a Geo object to its ID value (integer) for storage as int in the DB (in a DB field of type GEO)."""
+    if isinstance(obj, Geo):
+        try:
+            return obj.ID       # obj.ID es UUID (type str).
+        except (AttributeError, NameError, ValueError):
+            raise sqlite3.Error(f'Geo - Conversion error: {obj} is not a valid Geo object.')
+    return obj
+
+def convert_to_geo(val):
+    """ Converts UUID from a DB column of name GEOTEXT to a Geo Object, returning the obj found in __registerDict[val]
+     GEOTEXT column has TEXT affinity, but it doesn't return a string. Must decode() value received. """
+    try:
+        ret = Geo.getGeoEntities().get(val.decode('utf-8'), None)   # OJO:sqlite3 pasa val como byte. Must decode()!
+    except (TypeError, ValueError, AttributeError):
+        # raise sqlite3.Error(f'ERR_Conversion error: {val} Geo Entity not registered or {val} is of invalid type.')
+        krnl_logger.warning(f'ERR_Conversion error: {val} Geo Entity not registered or {val} is of invalid type.')
+        return val
+    else:
+        return ret if ret is not None else val    # if key is not found, returns val for processing by the application.
+
+
 class Geo(TransactionalObject):
-    __objClass = 102
-    __objType = 2
+    # __objClass = 102
+    # __objType = 2
+    __lock = Lock()
     __tblEntitiesName = 'tblGeoEntidades'
     __tblContainingEntitiesName = 'tblGeoEntidadContainer'
     __tblEntityTypesName = 'tblGeoTiposDeEntidad'
     __tblLocalizationLevelsName = 'tblGeoNivelesDeLocalizacion'
     __tblObjectsName = __tblEntitiesName
+    __tblObjectsDBName = getTblName(__tblObjectsName)
+    __registerDict = {}         # {fldObjectUID: geoObj, }
 
+    def __call__(self, caller_object=None, *args, **kwargs):        # Not sure this is required here.
+        """
+        @param caller_object: instance of Bovine, Caprine, etc., that invokes the Activity
+        @param args:
+        @param kwargs:
+        @return: Activity object invoking __call__()
+        """
+        # item_obj=None above is important to allow to call fget() like that, without having to pass parameters.
+        # print(f'>>>>>>>>>>>>>>>>>>>> {self} params - args: {(item_object, *args)}; kwargs: {kwargs}')
+        self.outerObject = caller_object  # item_object es instance de Animal, Tag, etc. NO PUEDE SER class por ahora.
+        return self
+
+
+    # Variables para logica de manejo de objetos repetidos/duplicados.
+    _fldID_list = []  # List of all active records pulled by getRecords() from tblAnimales.
+    # _new_local_fldIDs = []  # UID list for records added tblAnimales by local application.
+    _fldUPDATE_counter = 0  # Monotonic counter to detect and manage record UPDATEs.
+
+    _active_uids_dict = {}  # {fldObjectUID: fld_Duplication_Index}
+    _duplic_index_checksum = 0     # Sum of _Duplication_Index values to detect changes in _active_uids_df
+    _active_duplication_index_dict = {}  # {fld_Duplication_Index: set(fldObjectUID, dupl_uid1, dupl_uid2, ), }
+
+    @classmethod
+    def getGeoEntities(cls):
+        return cls.__registerDict       # {fldObjectUID: geoObj, }
+
+    @classmethod
+    def getObjectTblName(cls):
+        return cls.__tblObjectsName
+
+    temp1 = getRecords(__tblLocalizationLevelsName, '', '', None, 'fldID', 'fldName', 'fldNivelDeLocalizacion',
+                         'fldGeoLocalizationActive', 'fldFlag_EntidadEstado', 'fldNivelContainerMandatorio')
+    __localizationLevelsDict = {}
+    for j in range(temp1.dataLen):
+        # {localizLevelName: [localizLevel, localizLevelActive, Entidad Estado YN, Container Mandatorio, tipoEntidad], }
+        __localizationLevelsDict[removeAccents(temp1.dataList[j][1])] = [temp1.dataList[j][2], temp1.dataList[j][3],
+                                                                         temp1.dataList[j][4], temp1.dataList[j][5],
+                                                                         temp1.dataList[j][0]]
     @classmethod
     def tblObjName(cls):
         return cls.__tblObjectsName
 
-    _geoEntitiesDict = {}          # {entityID: {}, }
+    @classmethod
+    def tblObjDBName(cls):
+        return cls.__tblObjectsDBName
+
 
     @classmethod
-    def getGeoEntities(cls):
-        return cls._geoEntitiesDict
+    def getLocalizLevelsDict(cls):
+        return cls.__localizationLevelsDict
 
-    # TODO: Revisar y actualizar utilizacion de estos 3 dicts de abajo.
-    temp = getRecords(__tblEntityTypesName, '', '', None, 'fldID', 'fldName', 'fldRequiredEntityType',
-                         'fldMultipleContainersList')
-    __entityTypesDict = {}
-    for j in range(temp.dataLen):
-        __entityTypesDict[temp.dataList[j][1]] = [temp.dataList[j][0], temp.dataList[j][2], temp.dataList[j][3]]
-        # diccionario de forma {[NombreTipoDeEntidad: [EntityType_ID, requiredEntityType, fldMultipleContainersList]}
 
-    temp = getRecords(__tblLocalizationLevelsName, '', '', None, 'fldID', 'fldName', 'fldGeoLocalizationOrder',
-                         'fldGeoLocalizationActive')
-    __localizationLevelsDict = {}
-    for j in range(temp.dataLen):
-        # {localizLevelName: [fldID, localizLevelOrder, localizLevelActive], }
-        __localizationLevelsDict[temp.dataList[j][1]] = [temp.dataList[j][0], temp.dataList[j][2], temp.dataList[j][3]]
+    # reserved name, so that it's not inherited by lower classes, resulting in multiple executions of the trigger.
+    # @staticmethod
+    # def _generate_trigger_duplication(tblName):
+    #     temp = DataTable(tblName)
+    #     tblObjDBName = temp.dbTblName
+    #     Dupl_Index_val = f'(SELECT DISTINCT _Duplication_Index FROM "{tblObjDBName}" WHERE Identificadores_str ' \
+    #                      f'== NEW. Identificadores_str AND "FechaHora Registro" == (SELECT MIN("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM "{tblObjDBName}" ' \
+    #                      f'WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL))) AND ' \
+    #                      f'("Salida YN" == 0 OR "Salida YN" IS NULL)), '
+    #
+    #     flds_keys = f'_Duplication_Index'
+    #     flds_values = f'{Dupl_Index_val}'
+    #     if isinstance(temp, DataTable) and temp.fldNames:
+    #         flds = temp.fldNames
+    #         excluded_fields = ['fldID', 'fldObjectUID', 'fldTimeStamp', 'fldTerminal_ID', 'fld_Duplication_Index']
+    #
+    #         # TODO: Must excluded all GENERATED COLUMNS to avoid attempts to update them, which will fail. fldID must
+    #         #  always be removed as its value is previously defined by the INSERT operation that fired the Trigger.
+    #         tbl_info = exec_sql(sql=f'PRAGMA TABLE_XINFO("{tblObjDBName}");')
+    #         if len(tbl_info) > 1:
+    #             idx_colname = tbl_info[0].index('name')
+    #             idx_hidden = tbl_info[0].index('hidden')
+    #             tbl_data = tbl_info[1]
+    #             restricted_cols = [tbl_data[j][idx_colname] for j in range(len(tbl_data)) if
+    #                                tbl_data[j][idx_hidden] > 0]
+    #             if restricted_cols:  # restricted_cols: Hidden and Generated cols do not support UPDATE operations.
+    #                 restricted_fldnames = [k for k, v in temp.fldMap().items() if v in restricted_cols]
+    #                 excluded_fields.extend(restricted_fldnames)
+    #             excluded_fields = tuple(excluded_fields)
+    #
+    #         for f in excluded_fields:
+    #             if f in flds:
+    #                 flds.remove(f)
+    #         fldDBNames = [v for k, v in temp.fldMap().items() if
+    #                       k in flds]  # [getFldName(cls.tblObjName(), f) for f in flds]
+    #         flds_keys += f', {str(fldDBNames)[1:-1]}'  # [1:-1] removes starting and final "[]" from string.
+    #
+    #         for f in fldDBNames:
+    #             flds_values += f'NEW."{f}"' + (', ' if f != fldDBNames[-1] else '')
+    #     db_trigger_duplication_str = f'CREATE TRIGGER IF NOT EXISTS "Trigger_{tblObjDBName}_INSERT" AFTER INSERT ON "{tblObjDBName}" ' \
+    #                                  f'FOR EACH ROW BEGIN ' \
+    #                                  f'UPDATE "{tblObjDBName}" SET Terminal_ID = (SELECT Terminal_ID FROM _sys_terminal_id LIMIT 1), _Duplication_Index = NEW.UID_Objeto ' \
+    #                                  f'WHERE "{tblObjDBName}".ROWID == NEW.ROWID AND _Duplication_Index IS NULL; ' \
+    #                                  f'UPDATE "{tblObjDBName}" SET ({flds_keys}) = ({flds_values}) ' \
+    #                                  f'WHERE "{tblObjDBName}".ROWID IN (SELECT "{temp.getDBFldName("fldID")}" FROM (SELECT DISTINCT "{temp.getDBFldName("fldID")}", "FechaHora Registro" FROM "{tblObjDBName}" ' \
+    #                                  f'WHERE Identificadores_str == NEW.Identificadores_str ' \
+    #                                  f'AND ("Salida YN" == 0 OR "Salida YN" IS NULL) ' \
+    #                                  f'AND "FechaHora Registro" >= (SELECT MIN("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM "{tblObjDBName}" ' \
+    #                                  f'WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL))))); ' \
+    #                                  f'UPDATE _sys_Trigger_Tables SET TimeStamp = NEW."FechaHora Registro" ' \
+    #                                  f'WHERE DB_Table_Name == "{tblObjDBName}" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID AND NEW.Terminal_ID IS NOT NULL; ' \
+    #                                  f'END; '
+    #
+    #     print(f'Mi triggercito "{temp.dbTblName}" es:\n {db_trigger_duplication_str}')
+    #     return db_trigger_duplication_str
 
-    def __init__(self, entity=None, *args, **kwargs):                    # Falta terminar este constructor
+
+    # @classmethod
+    # def _generate_trigger_duplication00(cls):
+    #     Dupl_Index_val = f'(SELECT DISTINCT _Duplication_Index FROM "{cls.tblObjDBName()}" WHERE Identificadores_str ' \
+    #                      f'== NEW. Identificadores_str AND "FechaHora Registro" == (SELECT MIN("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM "{cls.tblObjDBName()}" ' \
+    #                      f'WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL))) AND ' \
+    #                      f'("Salida YN" == 0 OR "Salida YN" IS NULL)), '
+    #
+    #     flds_keys = f'_Duplication_Index'
+    #     flds_values = f'{Dupl_Index_val}'
+    #     temp = DataTable(cls.tblObjName())
+    #     if temp.fldNames:
+    #         flds = temp.fldNames
+    #         excluded_fields = ['fldID', 'fldObjectUID', 'fldTimeStamp', 'fldTerminal_ID', 'fld_Duplication_Index']
+    #
+    #         # TODO: Must excluded all GENERATED COLUMNS to avoid attempts to update them, which will fail. fldID must
+    #         #  always be removed as its value is previously defined by the INSERT operation that fired the Trigger.
+    #         tbl_info = exec_sql(sql=f'PRAGMA TABLE_XINFO("{cls.tblObjDBName()}");')
+    #         if len(tbl_info) > 1:
+    #             idx_colname = tbl_info[0].index('name')
+    #             idx_hidden = tbl_info[0].index('hidden')
+    #             tbl_data = tbl_info[1]
+    #             restricted_cols = [tbl_data[j][idx_colname] for j in range(len(tbl_data)) if
+    #                                tbl_data[j][idx_hidden] > 0]
+    #             if restricted_cols:  # restricted_cols: Hidden and Generated cols do not support UPDATE operations.
+    #                 restricted_fldnames = [k for k, v in temp.fldMap().items() if v in restricted_cols]
+    #                 excluded_fields.extend(restricted_fldnames)
+    #             excluded_fields = tuple(excluded_fields)
+    #
+    #         for f in excluded_fields:
+    #             if f in flds:
+    #                 flds.remove(f)
+    #         fldDBNames = [v for k, v in temp.fldMap().items() if
+    #                       k in flds]  # [getFldName(cls.tblObjName(), f) for f in flds]
+    #         flds_keys += f', {str(fldDBNames)[1:-1]}'  # [1:-1] removes starting and final "[]" from string.
+    #
+    #         for f in fldDBNames:
+    #             flds_values += f'NEW."{f}"' + (', ' if f != fldDBNames[-1] else '')
+    #     db_trigger_duplication_str = f'CREATE TRIGGER IF NOT EXISTS "Trigger_{cls.tblObjDBName()}_INSERT" AFTER INSERT ON "{cls.tblObjDBName()}" ' \
+    #                                  f'FOR EACH ROW BEGIN ' \
+    #                                  f'UPDATE "{cls.tblObjDBName()}" SET Terminal_ID = (SELECT Terminal_ID FROM _sys_terminal_id LIMIT 1), _Duplication_Index = NEW.UID_Objeto ' \
+    #                                  f'WHERE "{cls.tblObjDBName()}".ROWID == NEW.ROWID AND _Duplication_Index IS NULL; ' \
+    #                                  f'UPDATE "{cls.tblObjDBName()}" SET ({flds_keys}) = ({flds_values}) ' \
+    #                                  f'WHERE "{cls.tblObjDBName()}".ROWID IN (SELECT "{temp.getDBFldName("fldID")}" FROM (SELECT DISTINCT "{temp.getDBFldName("fldID")}", "FechaHora Registro" FROM "{cls.tblObjDBName()}" ' \
+    #                                  f'WHERE Identificadores_str == NEW.Identificadores_str ' \
+    #                                  f'AND ("Salida YN" == 0 OR "Salida YN" IS NULL) ' \
+    #                                  f'AND "FechaHora Registro" >= (SELECT MIN("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM "{cls.tblObjDBName()}" ' \
+    #                                  f'WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL))))); ' \
+    #                                  f'UPDATE _sys_Trigger_Tables SET TimeStamp = NEW."FechaHora Registro" ' \
+    #                                  f'WHERE DB_Table_Name == "{cls.tblObjDBName()}" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID AND NEW.Terminal_ID IS NOT NULL; ' \
+    #                                  f'END; '
+    #
+    #     print(f'Mi triggercito "{cls.tblObjDBName()}" es:\n {db_trigger_duplication_str}')
+    #     return db_trigger_duplication_str
+
+    @classmethod
+    def _init_uid_dicts(cls):
+        """   ***** This method MUST support multiple access. In particular, WILL NOT remove items from dicts *****
+        Initializes uid dicts upon system start up and when the dict_update flag is set for the class by SQLite.
+        This method is run in the __init_subclass__() routine in EntityObject class during system start, and by
+        _processDuplicates() run by background functions.
+        Uses a checksum of _active_uids_df.values() to determine if there are changes to the dict.
+        @return: None
+        """
+        sql = f'SELECT * from "{cls.tblObjDBName()}" WHERE ("{getFldName(cls.tblObjName(), "fldDateExit")}" IS NULL OR ' \
+              f'"{getFldName(cls.tblObjName(), "fldDateExit")}" == 0) ; '
+        df = pd.read_sql_query(sql, SQLiteQuery().conn)
+        if df.empty:
+            val = f"ERR_DBAccess cannot read from table {cls.tblObjDBName()} internal uid_dicts no initialized. " \
+                  f"System cannot operate."
+            krnl_logger.warning(val)
+            raise sqlite3.DatabaseError(val)
+
+        col_uid = df['fldObjectUID'].tolist()
+        col_duplication_index = df['fld_Duplication_Index'].replace(
+            {np.nan: None, float('nan'): None, pd.NA: None}).tolist()
+        dicto1 = dict(zip(col_uid, col_duplication_index))  # Reference dic
+
+        # Check for differences in dict values. Must update _active_uids_df,  _active_duplication_index_dict.
+        current_checksum = getattr(cls, '_duplic_index_checksum', 0)
+        try:
+            """ There is a long-shot chance that the checksum below fails when 2 or more items change and the 
+                resulting sum remains unaltered. Then, there's an efficiency-driven bet that such a scenario will 
+                NEVER materialize. IF it ever does, it will correct itself next time the checksum changes, and 
+                all db records will be properly updated and re-assigned. """
+            checksum = sum([UUID(j).int for j in col_duplication_index if isinstance(j, str)])
+        except(TypeError, ValueError):
+            checksum = current_checksum  # On checksum failure, must exit with checksums unchanged.
+
+        temp_dict = {}
+        if checksum != cls._duplic_index_checksum:
+            # Initializes __active_Duplication_Index_dict ONLY FOR DUPLICATE uids.
+            # An EMPTY _active_duplication_index_dict means there's NO duplicates for that uid in the db table.
+            setattr(cls, '_duplic_index_checksum', checksum)  # Updates checksum.
+            dicto2 = {k: v for k, v in dicto1.items() if v is not None}  # dict with None values stripped off.
+            duplic_values = list(dicto2.values())
+            for item in set(duplic_values):  # item is a _Duplication_Index value.
+                if duplic_values.count(item) > 1:
+                    # If item appears more than once in col_duplication_index, it's a duplicate item.
+                    # Gets all the uids associated to _Duplication_Index for item.
+                    uid_list = [col_uid[j] for j, val in enumerate(col_duplication_index) if val == item]
+                    # ONLY DUPLICATE ITEMS HERE (_Duplication_Index count > 1), to make search more efficient.
+                    temp_dict[item] = tuple(uid_list)
+
+            if temp_dict:  # There are changes in _Duplication_Index values. Must update both dicts.
+                with cls.__lock:  # Both must be updated in the lock block.
+                    cls._active_uids_dict = dicto1
+                    cls._active_duplication_index_dict = temp_dict
+            else:
+                # If there's differences in dict keys only -> Initializes / updates _active_uids_df only.
+                if set(dicto1) != set(cls._active_uids_dict.keys()):  # Changes in keys only.Updates _active_uids_df
+                    cls._active_uids_dict = dicto1  # THIS IS A SHARED DICT. The assignment operation should be atomic.
+
+        return None
+
+    # @classmethod
+    # def _init_uid_dicts(cls):
+    #     """   ***** This method MUST support multiple access. In particular, WILL NOT remove items from dicts *****
+    #     Initializes uid dicts upon system start up and when the dict_update flag is set for the class by SQLite.
+    #     This method is run in the __init_subclass__() routine in EntityObject class during system start, and by
+    #     _processDuplicates() run by background functions.
+    #     Uses a checksum of _active_uids_df.values() to determine if there are changes to the dict.
+    #     @return: None
+    #     """
+    #     sql = f'SELECT * from "{cls.tblObjDBName()}" WHERE ("{getFldName(cls.tblObjName(), "fldDateExit")}" IS NULL OR ' \
+    #           f'"{getFldName(cls.tblObjName(), "fldDateExit")}" == 0) ; '
+    #     temp = dbRead(cls.tblObjName(), sql)
+    #     if not isinstance(temp, DataTable):
+    #         val = f"ERR_DBAccess cannot read from table {cls.tblObjDBName()} internal uid_dicts no initialized. " \
+    #               f"System cannot operate."
+    #         krnl_logger.warning(val)
+    #         raise DBAccessError(val)
+    #     if temp:
+    #         idx_uid = temp.getFldIndex("fldObjectUID")
+    #         col_uid = [j[idx_uid] for j in temp.dataList]
+    #         idx_dupl = temp.getFldIndex("fld_Duplication_Index")
+    #         col_duplication_index = [j[idx_dupl] for j in temp.dataList]  # temp.getCol("fld_Duplication_Index")
+    #         dicto1 = dict(zip(col_uid, col_duplication_index))  # Reference dict with all values
+    #
+    #         # Check for differences in dict values. Must update _active_uids_df,  _active_duplication_index_dict.
+    #         try:
+    #             checksum = sum([UUID(j).int for j in col_duplication_index if isinstance(j, str)])
+    #         except(TypeError, ValueError):
+    #             checksum = cls._duplic_index_checksum  # On checksum failure, must exit with checksums unchanged.
+    #         temp_dict = {}
+    #         if checksum != cls._duplic_index_checksum:
+    #             # Initializes __active_Duplication_Index_dict ONLY FOR DUPLICATE uids.
+    #             # An EMPTY _active_duplication_index_dict means there's NO duplicates for that uid in the db table.
+    #             cls._duplic_index_checksum = checksum
+    #             dicto2 = {k: v for k, v in dicto1.items() if v is not None}  # dict with None values stripped off.
+    #             # for item in col_duplication_index:              # item is a _Duplication_Index value.
+    #             duplic_values = list(dicto2.values())
+    #             for item in duplic_values:
+    #                 if item is not None and duplic_values.count(item) > 1:
+    #                     # If item appears more than once in col_duplication_index, it's a duplicate item.
+    #                     # Gets all the uids associated to _Duplication_Index for item.
+    #                     uid_list = [col_uid[j] for j, val in enumerate(col_duplication_index) if val == item]
+    #                     # ONLY DUPLICATE ITEMS HERE (_Duplication_Index count > 1), to make search more efficient.
+    #                     temp_dict[item] = tuple(uid_list)
+    #
+    #         if temp_dict:  # There are changes in _Duplication_Index values. Must update both dicts.
+    #             with cls.__lock:  # Both must be updated in the lock block.
+    #                 cls._active_uids_df = dicto1
+    #                 cls._active_duplication_index_dict = temp_dict
+    #         else:
+    #             # If there's differences in dict keys only -> Initializes / updates _active_uids_df only.
+    #             if set(dicto1) != set(cls._active_uids_df.keys()):  # Changes in keys only.Updates _active_uids_df
+    #                 cls._active_uids_df = dicto1  # THIS IS A SHARED DICT. The assignment operation should be atomic.
+    #
+    #     return None
+
+    @classmethod
+    def _processDuplicates(cls):  # Run by  Caravanas, Geo, Personas in other classes.
+        """             ******  Run from an AsyncCursor queue. NO PARAMETERS ACCEPTED FOR NOW. ******
+                        ******  Run periodically as an IntervalTimer func. ******
+                        ****** This code should (hopefully) execute in LESS than 5 msec (switchinterval).   ******
+        Re-loads duplication management dicts for class cls.
+        @return: True if dicts are updated, False if reading tblAnimales from db fails or dicts not updated.
+        """
+        sql_trigger_tables = f'SELECT * FROM _sys_Trigger_Tables WHERE DB_Table_Name == "{cls.tblObjDBName()}" AND ' \
+                          f'ROWID == Flag_ROWID; '
+        tempdf = pd.read_sql_query( sql_trigger_tables, SQLiteQuery().conn)  # Only 1 record (for Terminal_ID) is pulled.
+        # if isinstance(temp, DataTable) and temp:
+        time_stamp = tempdf.loc[0, 'fldTimeStamp']  # time of the latest update to the table.
+        # print(f'hhhhhhooooooooooolaa!! "{cls.tblObjDBName()}".processDuplicates - TimeStamp  = {time_stamp}!!')
+        # val = values_list[0] if values_list else None
+        # if val:
+        if isinstance(time_stamp, datetime) and time_stamp > tempdf.loc[0, 'fldLast_Processing']:
+            cls._init_uid_dicts()  # Reloads uid_dicts for class Geo.
+            print(f'hhhhhhooooooooooolaa!! Estamos en Geo.processDuplicates. Just updated the dicts!!')
+            # If dicts are processed, remove animalClassID items from db _sys_Trigger_Table.
+
+            # Updates record in _sys_Trigger_Tables if with all entries for table just processed removed.
+            # TODO(cmt): VERY IMPORTANT. _sys_Trigger_Tables.Last_Processing MUST BE UPDATED here before exiting.
+            tempdf.loc[0, 'fldLast_Processing'] = time_stamp
+            _ = setRecord('tbl_sys_Trigger_Tables', **tempdf.loc[0].to_dict())
+            return True
+        return None
+
+    __trig_name_duplication = 'Trigger_Geo Entidades_INSERT'
+
+    @classmethod
+    def _processReplicated(cls):
+        pass
+
+    # List here ALL triggers defined for Animales table. Triggers can be functions (callables) or str.
+    # TODO: Careful here. _processDuplicates is stored as an UNBOUND method. Must be called as _processDuplicates(cls)
+    __db_triggers_list = [(__trig_name_duplication, _processDuplicates), ]
+
+    def __init__(self, *args, **kwargs):                    # Falta terminar este constructor
+        self.__ID = str(kwargs.get('fldObjectUID'))
+        try:
+            _ = UUID(self.__ID)                         # Validacion de valor en columna fldObjectUID leida de db.
+        except(ValueError, TypeError, AttributeError):
+            raise TypeError(f'ERR_INP_TypeError: Invalid/malformed UID {self.__ID}. Geo object cannot be created.')
         self.__isValid = True
-        self._ID = entity
+        self.__recordID = kwargs.get('fldID')       # Useful to access the record directly. NOT expected to change!!
+        self.__isActive = kwargs.get('fldFlag', 1)
+        self.__name = kwargs.get('fldName')
+        self.__containers = kwargs.get('fldContainers', [])  # getting fldContainers from JSON field: Geo objects.
+
+        if not self.__containers or not isinstance(self.__containers, (tuple, list, str)):
+            self.__containers = []
+        elif isinstance(self.__containers, str):
+            self.__containers = [self.__containers, ]  # Si str no es convertible a str -> Exception y a corregir.
+        else:
+            self.__containers = list(self.__containers)
+        self.__container_tree = []    # Lista de objetos Geo asociados a los IDs de __containers.
+        self.__localizationLevel = kwargs.get('fldFK_NivelDeLocalizacion')
+        self.__abbreviation = kwargs.get('fldAbbreviation', '')
+        self.__entityType = kwargs.get('fldFK_TipoDeEntidad')   # int Code for Pais, Provincia, Establecimiento, etc.
+        # self.__country = kwargs.get('fldFK_Pais')
+        # self.__farmstead = kwargs.get('fldFK_Establecimiento', '')          # farmstead = Establecimiento
+        self.__isStateEntity = kwargs.get('fldFlag_EntidadEstado', 0)
+        self.__area = kwargs.get('fldArea')
+        self.__areaUnits = kwargs.get('fldFK_Unidad', 11)           # 11: Hectarea.
         super().__init__()
 
     @property
     def ID(self):
-        return self._ID
+        return self.__ID
+
+    @property
+    def recordID(self):
+        return self.__recordID
+
+    @property
+    def name(self):
+        return self.__name
 
     @classmethod
-    def initialize(cls):
+    def getName(cls, name: str):
+        n = removeAccents(name)
+        namesDict = {k: cls.getGeoEntities()[k].name for k in cls.getGeoEntities() if n in
+                     removeAccents(cls.getGeoEntities()[k].name)}
+        return namesDict
+
+    @classmethod
+    def getUID(cls, name: str):
+        name = re.sub(r'[-\\|/@#$%^*()=+¿?{}"\'<>,:;_]', ' ', name)
+        name_words = [j for j in removeAccents(name).split(" ") if j]
+        return next((k for k in cls.getGeoEntities()
+                     if all(word in removeAccents(cls.getGeoEntities()[k].name) for word in name_words)), None)
+
+        # n = removeAccents(name)
+        # return next((k for k in cls.getGeoEntities() if n == removeAccents(cls.getGeoEntities()[k].name)), None)
+
+    @classmethod
+    def getObject(cls, name: str, *, localiz_level=None):
+        """ Returns the Geo objects associated to name. **** Caution: ALWAYS returns a tuple.  ****
+        Name can be a UUID or a regular "human" string name ('El Palmar - Lote 2', '9 de Julio', 'santa fe', etc.).
+        @return: Geo objects tuple (1 or more objects) if any found; () if name not found in getGeoEntities dict.
+        """
+        try:
+            o = cls.getGeoEntities().get(name, None)            # Primero busca un uid y lo retorna si existe.
+        except (SyntaxError, TypeError):
+            return ()
+        if o is None:
+            if isinstance(name, str):
+                try:
+                    name = re.sub(r'[-\\|/@#$%^*()=+¿?{}"\'<>,:;_]', ' ', name)        # Remove all special characters.
+                    name_words = [j for j in removeAccents(name).split(" ") if j]      # split to list of words.
+                    name = "".join(j for j in name_words).strip()  # all spaces removed, for string comparison.
+                except (TypeError, AttributeError, SyntaxError, ValueError):
+                    return ()
+                else:
+                    name_matches = {k: v for k, v in cls.getGeoEntities().items() if
+                                    all(word in removeAccents(v.name) for word in name_words)}
+                    if localiz_level:
+                        localized = {k: v for k, v in name_matches.items() if v.localizLevel == localiz_level}
+                        if localized:
+                            name_matches = localized   # If no matches with passed localiz_level -> returns all matches.
+                    # List of ALL geo objects with names matching name
+                    obj_list = [v for k, v in name_matches.items() if name in
+                                removeAccents(re.sub(r'[-\\|/@#$%^*()=+¿?{}"\'<>,:;_ ]', '', v.name))]
+                    return tuple(obj_list)
+        else:
+            return o,
+        return ()
+
+
+    @classmethod
+    def _initialize(cls):
         return cls.loadGeoEntities()
 
     @classmethod
     def loadGeoEntities(cls):
+        """ This method is run in TransactionalObject.__init_subclass__(). So class is not fully initialized yet!! """
         temp1 = getRecords(cls.tblObjName(), '', '', None, '*', fldFlag=1)  # Carga solo GeoEntidades activas.
         if isinstance(temp1, str):
-            retValue = f'ERR_DBAccess: Cannot load Geography table.'
+            retValue = f'ERR_DBAccess: Cannot load Geography table. Error: {temp1}'
             krnl_logger.error(retValue)
-            print(retValue)
-            return retValue
+            raise DBAccessError(retValue)
 
         for j in range(temp1.dataLen):
             tempDict = temp1.unpackItem(j)
-            # TODO(cmt): Hay que re-convertir los keys de fldContainerTree a int (convertidos a str por el JSON Encoder)
-            # Solucionado con hook para json.loads(): intercepta todos los dicts y convierte keys a int cuando se puede
-            cls._geoEntitiesDict[tempDict.pop('fldID')] = tempDict
+            geoID = tempDict.get('fldObjectUID', '')  # Since fldObjectUID has TEXT affinity, converts fld value to str.
+            if geoID:
+                cls.getGeoEntities()[geoID] = cls(**tempDict)       # Creates Geo object and adds to __registerDict.
+
+        # Hay que usar loops for separados para inicializar TUTTO el __registerDict
+        for entity in cls.getGeoEntities().values():
+            container_list = entity.__containers    # __containers aqui es una lista de UID(str).
+            if container_list:       # TODO(cmt): Convierte elementos de __containers de UID(str) a Geo.
+                entity.__containers = [cls.getGeoEntities()[j] for j in container_list]  # if j in cls.getGeoEntities()
+                entity.__container_tree = entity.__containers.copy()  # copy: cannot _generate_container_tree() here!!
+
+            # Initializes the full_uid_list. Used to drive the duplicate detection logic. --> DEPRECATED!!
+        # cls._fldID_list = set(g.recordID for g in cls.getGeoEntities().values())
+        # # Initializes _object_fldUPDATE_dict={fldID: fldUPDATE(dictionary), }. Used to process records UPDATEd by other nodes.
+        # cls._fldUPDATE_dict = {g.recordID: temp1.getVal(0, 'fldUPDATE', fldID=g.recordID) for g in
+        #                        cls.getGeoEntities().values()}
+
         return True
 
+    def _generate_container_tree(self):
+        """Creates a list of GEO objects which are all containers for self. """
+        aux_container = self.__containers
+        for j in aux_container:
+            self.__container_tree.extend(self._iter_containers(j))
+            self.__container_tree.append(j)
+        self.__container_tree.append(self)   # TODO(cmt): self por def. esta contenido en self -> Agrega al tree.
+        self.__container_tree = list(set(self.__container_tree))
+        self.__container_tree.sort(key=lambda x: x.localizLevel, reverse=True)  # Ordena por localizLevel decr.
+        # print(f'--- Tree for geoObject {self.name}({self.ID}): {[t.name for t in self.__container_tree]}',
+        #       dismiss_print=DISMISS_PRINT)
+        return self.__container_tree
 
-    @classmethod
-    def getEntityTypesDict(cls):
-        """
-        Returns Dictionary with Entity Types Names and IDs
-        @return: {Entity Name: Entity Type ID, }
-        """
-        return cls.__entityTypesDict
+    @staticmethod
+    def _iter_containers(geo_obj):  # geo_obj DEBE ser objeto Geo.
+        """ Iterator to build container tree for each Geo object. """
+        for item in geo_obj.__containers:
+            if isinstance(item, (tuple, list)):         # 1. Procesa lista de objetos Geo.
+                for obj in item:
+                    if isinstance(obj, Geo):
+                        yield obj
+                    for loc in geo_obj._iter_containers(obj):       # Procesa elementos (loc) de una lista (obj)
+                        if isinstance(loc, Geo):
+                            yield loc
+            else:
+                yield item                              # 2. Procesa objetos Geo individuales
+                for obj in geo_obj._iter_containers(item):
+                    if isinstance(obj, Geo):
+                        # print(f'obj is: {o.name}')
+                        yield obj
 
-    @classmethod
-    def geoEntities(cls, *args):
-        """
-        Returns dictionary with Geo Entities from DB. Read from DB everytime. DO NOT store this in memory.
-        @param args: list of idEntities (int) to return info for. if None, returns ALL records in table [Geo Entidades]
-        @return: {entityID: {fldName: fldValue, }, }
-        """
-        argsParsed = [i for i in args if isinstance(i, int) and i > 0]
-        if argsParsed:
-            temp = getRecords(cls.__tblEntitiesName, '', '', None, '*', fldID=argsParsed)
-        else:
-            temp = getRecords(cls.__tblEntitiesName, '', '', None, '*')      # Si no hay args, retorna toda la tabla
-        if type(temp) is str:
-            retValue = f'ERR_INP_InvalidArgument: {temp}. {cls.__tblEntitiesName} - {callerFunction()}'
-            krnl_logger.info(retValue)
-            print(f'{moduleName()}({lineNum()}) - {retValue}', dismiss_print=DISMISS_PRINT)
-        else:
-            retDict = {}
-            for j in range(temp.dataLen):
-                record = temp.unpackItem(j)
-                idRecord = record.pop('fldID', False)   # Saca fldID del Diccionario "interno"
-                if idRecord is not False:
-                    retDict[idRecord] = record
-            retValue = retDict
-        return retValue
+    @property
+    def localizLevel(self):
+        return self.__localizationLevel
 
-    __dataFieldMap = {'name': 'fldName', 'abbreviation': 'fldAbbreviation', 'level': 'fldFK_NivelDeLocalizacion',
-                      'country': 'fldFK_Pais', 'establecimiento': 'fldFK_Establecimiento',
-                      'ranch': 'fldFK_Establecimiento', 'area': 'fldArea', 'containers': 'fldContainerTree',
-                      'active': 'fldFlag', 'type': 'fldFK_TipoDeEntidad', 'entityname': 'fldName'}
+    @property
+    def containers(self):
+        """ Returns tuple with Geo objects IDs. All containers for self. """
+        return self.__containers
 
-    @classmethod
-    def getEntityData(cls, entityID=None, *, data_field=None):
-        """ Fetches Geo Entity data for entityID and data field data_field.
-            Returns field value or None if field or geoEntity not found."""
-        if data_field and isinstance(data_field, str) and entityID in cls.getGeoEntities():
-            fld = next((cls.__dataFieldMap[j] for j in cls.__dataFieldMap if
-                        j.__contains__(data_field.strip().lower().replace(' ', ''))), None)
-            if fld:
-                return cls.getGeoEntities()[entityID].get(fld)
-            return cls.getGeoEntities()[entityID].get(data_field)
-        return None
+    @containers.setter
+    def containers(self, item):
+        self.__containers = item            # Careful!: Item can by anything...
 
-    @classmethod
-    def compareLocations(cls, *, loc1=None, loc2=None, is_contained=True):
-        """ Compares entity1 and entity1 to determine relationship.
-        @param loc2: Entity to check if is or belongs to entity1.
-        @param loc1: Container entity to check entity1 against.
-        @param is_contained: True (default) -> returns valid (True) if entity1 is contained in or is equal to loc2
-                             False -> returns valid (True) ONLY if entity1 IS EQUAL to loc2
-        """
-        if all(j in cls.getGeoEntities() for j in (loc1, loc2)):
-            if is_contained is True:
-                containers = cls.getEntityData(loc1, data_field='containers')
-                # print(f'***{moduleName()}({lineNum()}) Geo compareLocations() containers: {containers}',
-                # dismiss_print=DISMISS_PRINT)
-                return True if loc2 in containers and \
-                               (cls.getEntityData(loc2, data_field='level') <=
-                                cls.getEntityData(loc1, data_field='level')) else False
-            return loc1 == loc2
-        return False
+    @property
+    def container_tree(self):
+        return self.__container_tree
 
-    def contains(self, other):
+    @property
+    def entityType(self):
+        return self.__entityType
+
+    def contains(self, entity=None):
+        """ True if self is a container for entity. That is, entity is a part of and is included in self."""
         try:
-            containers = self.getEntityData(self.ID, data_field='containers')
-            return True if self.ID in containers and \
-                           (self.getEntityData(other.ID, data_field='level') >=
-                            self.getEntityData(self.ID, data_field='level')) else False
-        except (TypeError, AttributeError, NameError):
+            return self in entity.container_tree
+        except (AttributeError, TypeError, NameError):
             return False
 
-    def equal(self, other):
+    def contained_in(self, entity=None):
+        """ True if entity is a container for self. That is, self is included in entity. """
         try:
-            return self.ID == other.ID
-        except (TypeError, AttributeError, NameError):
+            return entity in self.container_tree
+        except TypeError:
             return False
 
-    def contained_in(self, other):
-        try:
-            containers = self.getEntityData(other.ID, data_field='containers')
-            return True if other.ID in containers and \
-                           (self.getEntityData(self.ID, data_field='level') >=
-                            self.getEntityData(other.ID, data_field='level')) else False
-        except (TypeError, AttributeError, NameError):
-            return False
+    def comp(self, val):            # Method to be used to run comparisons in ProgActivities methods.
+        """ Acepta como input Geo object o str (UUID). """
+        if isinstance(val, str):
+            val = self.getObject(val)
+        return self.contained_in(val) if isinstance(val, Geo) else False
+
+
+    @property
+    def isStateEntity(self):
+        return self.__isStateEntity
+
+    @property
+    def area(self):
+        return self.__area, self.__areaUnits
+
+    @property
+    def isActive(self):
+        return self.__isActive
+
+    def register(self):  # NO HAY CHEQUEOS. obj debe ser valido
+        self.__registerDict[self.ID] = self  # TODO: Design criteria: Si se repite key, sobreescribe con nuevo valor
+        return self
+
+    def unRegister(self):
+        """
+        Removes object from __registerDict
+        @return: removed object if successful. None if fails.
+        """
+        return self.__registerDict.pop(self.ID, None)  # Retorna False si no encuentra el objeto
 
 
     @classmethod
-    def createGeoEntity(cls, *args, **kwargs):     # obj corresponds to the handlerGeo object.
-        """
+    def createGeoEntity(cls, *args, name=None, entity_type: str = '',  containers=(), abbrev=None, state_entity=False,
+                        **kwargs):
+        """   For now, creates anything. TODO: Implement integrity checks for State Entities (country, province, etc.)
         Creates a geo Element (Country, Province, Establecimiento, Potrero, Location, etc). Adds it to the DB.
-        @param args: Not used
-        @param kwargs: Mandatory: fldName, fldFK_TipoDeEntidad, fldFK_EntidadContainer(s) depending on entityType.
-        fldFK_EntidadContainer contains one or more ID_Entidad of Container Entities for the entity being created.
-        At least the MANDATORY fldFK_EntidadContainer must be provided.
-        This obj_data is written in table [Geo Entidades Container] for the entity to be created.
-        @return: ID_GeoEntidad (int) or errorCode (str)
+         @param state_entity: Flag True/False
+         @param name: Entity Name. Mandatory.
+        @param abbrev: Name abbreviation. Not mandatory.
+         @param entity_type: Country, Province/State, Department, Establecimiento, Potrero, etc.
+        @param containers: list. Geo Entitities objects that contain the new entity (1 or more).
+        At least the MANDATORY container entity(es) must be provided.
+        @return: geoObj (Geo object) or errorCode (str)
         """
-        if kwargs:
-            kwargs.pop('fldID', None)  # This is a "create" method. Removes fldID because a NEW record is to be created
-        timeStamp = time_mt('datetime')
-        kwargs['fldTimeStamp'] = timeStamp
-        kwargs['fldFK_UserID'] = sessionActiveUser
-        tblEntity = setupArgs(Geo.__tblEntitiesName, *args, **kwargs)
-        if 'fldName' not in tblEntity.fldNames or 'fldFK_TipoDeEntidad' not in tblEntity.fldNames or \
-                'fldFK_Pais' not in tblEntity.fldNames or 'fldFK_NivelDeLocalizacion' not in tblEntity.fldNames:
-            retValue = 'ERR_InvalidArgument: Required arguments (fldName, fldFK_TipoDeEntidad, fldFK_Pais, ' \
-                       'fldFK_NivelDeLocalizacion) missing'
-            print(f'GEO.PY({lineNum()} - {retValue})', dismiss_print=DISMISS_PRINT)
-        else:
-            entityName = removeAccents(kwargs['fldName'])
-            entityType = kwargs['fldFK_TipoDeEntidad']
-            if entityType == cls.getEntityTypesDict()['Pais'][0]:      # 1) Entidad a crear es Pais.
-                temp = getRecords(Geo.__tblEntitiesName, '', '', None, '*', fldFK_TipoDeEntidad=entityType)
-                # normalizedNames is the DB Entity Name stripped of all accents, dieresis, etc.
-                normalizedNames = []  # if len(normalizedNames) == 0 -> There are no Entities of that type in DB
-                if temp.dataLen:
-                    namesCol = temp.getCol('fldName')
-                    for i in range(temp.dataLen):
-                        normalizedNames.append(removeAccents(namesCol[i]))
-                if entityName in normalizedNames:       # Checks if Pais name already exists.
-                    retValue = f'ERR_Name already exists: Pais(Country) - GEO.PY({lineNum()}'
-                else:
-                    retValue = setRecord(Geo.__tblEntitiesName, **tblEntity.unpackItem(0))
-                    tblEntity.setVal(0, fldID=retValue, fldFK_Pais=retValue)
-                    _ = setRecord(Geo.__tblEntitiesName, **tblEntity.unpackItem(0))
-            else:
-                containerTree = {}
-                try:
-                    # 2: Entidad a crear NO es Pais.
-                    if 'fldFK_EntidadContainer' not in kwargs:
-                        retValue = f'ERR_INP_Invalid Argument: Required argument fldFK_EntidadContainer missing'
-                        krnl_logger.info(retValue)
-                        print(f'GEO.PY({lineNum()}) - {retValue}')
-                        return retValue
-                    argsContainers = kwargs['fldFK_EntidadContainer']  # kwargs['fldFK_EntidadContainer']: int, [] or None
-                    # Aqui, hacer append de los containers producidos por getContainers() y unificar todos los container
-                    # Entities en containers,
-                    if not argsContainers:
-                        argsContainers = []
-                    elif type(argsContainers) is int:
-                        argsContainers = [argsContainers, ]  # Convierte a list para procesar Entidades Container
-                    treeContainers = []
-                    for i in argsContainers:
-                        treeContainers.extend(cls.getContainerEntities(i))
-                    # print(f'GEO.PY({lineNum()}) - Implicit Containers: {treeContainers}')
-                    containers = list(set(argsContainers + treeContainers))         # Adds lists and removes duplicates
-                    # print(f'GEO.PY({lineNum()}) - Entity Containers: {containers}')
-                except (KeyError, ValueError, IndexError):
-                    retValue = f'ERR_INP_Invalid Argument: Missing/Invalid mandatory Container Entity(Entidad Container)' \
-                               f' - {callerFunction()}'
-                    krnl_logger.info(retValue)
-                    return retValue
-
-                requiredEntityType = None       # Si no hay requiredEntityType, queda en None. NO deberia ser el caso
-                multiplesList = []
-                for i in Geo.__entityTypesDict:     # Pulls the Mandatory entityType for the entity being created
-                    if cls.getEntityTypesDict()[i][0] == entityType:
-                        requiredEntityType = cls.getEntityTypesDict()[i][1]
-                        multiplesList = cls.getEntityTypesDict()[i][2] if cls.getEntityTypesDict()[i][2] else []
-                        break
-                # Crea lista de Tipos de Entidades Container para los elementos de lista container
-                entitiesTable = getRecords(Geo.__tblEntitiesName, '', '', None, '*', fldID=containers)
-                entitiesCol = entitiesTable.getCol('fldID')
-                entitiesTypesCol = entitiesTable.getCol('fldFK_TipoDeEntidad')
-                containerTypes = []  # Lista con TipoDeEntidad de los containers pasados por kwargs e implicitos
-                implicitCountry = None
-                for j, idEntity in enumerate(entitiesCol):
-                    if idEntity in containers:
-                        if entitiesTypesCol[j] < entityType:        # DEBE ser < entityType para que sea Container
-                            containerTypes.append(entitiesTypesCol[j])
-                            containerTree[idEntity] = entitiesTypesCol[j]
-                        else:
-                            # containers.remove(entitiesCol[j])  # Elimina container Entity si el tipo es >= entityType
-                            # Sale con error: se paso un container no valido (>= Tipo de Entidad a crear) por kwargs.
-                            retValue = f'ERR_INP_Invalid Argument: Parent Entity {entitiesCol[j]} is not valid. ' \
-                                       f'Entity {kwargs["fldName"]} not created.'
-                            krnl_logger.info(retValue)
-                            print(f'GEO.PY({lineNum()}) - {retValue} - Function/Method {callerFunction(getCallers=True)}',
-                                  dismiss_print=DISMISS_PRINT)
-                            return retValue
-                        if entitiesTypesCol[j] == cls.getEntityTypesDict()['Pais'][0]:
-                            implicitCountry = idEntity
-                # Verifica existencia de Entity Types Mandatorios
-                if requiredEntityType not in containerTypes:
-                    retValue = 'ERR_INP_Invalid Argument: Required Parent Entity missing'
-                    krnl_logger.info(retValue)
-                    print(f'GEO.PY({lineNum()}) - {retValue}', dismiss_print=DISMISS_PRINT)
-                    return retValue         # Sale con error: falta Mandatory Container Entity
-
-                # Multiple Container Entities consist. check: more than 1 Entity of same type allowed only for multiples
-                for i in range(len(containerTypes)):
-                    count = containerTypes.count(containerTypes[i])
-                    if count > 1 and containerTypes[i] not in multiplesList:
-                        retValue = f'ERR_InvalidArgument: Multiple Entities {containerTypes[i]}. Only 1 allowed'
-                        print(f'GEO.PY({lineNum()}) - {retValue}')
-                        return retValue  # Sale con error: falta Mandatory Container Entity
-                print(f'GEO.PY({lineNum()}) - Container Entities={containers} / container types: {containerTypes}',
-                      dismiss_print=DISMISS_PRINT)
-
-                # Since it's not creating a new country (Pais), pulls ALL records for the country and Entity Type
-                # for which the new Entity is being created
-                pais = kwargs['fldFK_Pais'] if 'fldFK_Pais' in kwargs else implicitCountry
-                temp = getRecords(cls.__tblEntitiesName, '', '', None, '*', fldFK_TipoDeEntidad=entityType,
-                                  fldFK_Pais=pais)       # Por este call, fldFK_Pais debe ser campo Mandatorio.
-                normalizedNames = []  # if len(normalizedNames) == 0 -> There are no Entities of that type in DB
-                if temp.dataLen:
-                    namesCol = temp.getCol('fldName')
-                    for i in range(temp.dataLen):
-                        normalizedNames.append(removeAccents(namesCol[i]))  # normalizedNames del Pais y entityType
-                if entityName in normalizedNames:
-                    retValue = f'ERR_INP_ Name already exists: {entityName} - Function/Method: createGeoEntity()'
-                    print(f'GEO.PY({lineNum()}) - {retValue}', dismiss_print=DISMISS_PRINT)
-                    return retValue     # Si nombre ya existe para ese entityType, sale con error.
-
-                tblEntity.setVal(fldFK_Pais=pais, fldContainerTree=containerTree)
-                retValue = setRecord(cls.__tblEntitiesName, **tblEntity.unpackItem(0))  # Registro en Geo Entidades
-                tblEntity.setVal(0, fldID=retValue)
-
-                if Geo.getEntityTypesDict()['Establecimiento'][0] <= entityType < Geo.getEntityTypesDict()['Locacion'][0]:
-                    # Se debe llenar campo fldFK_Establecimiento para Establecimiento, Lote, Potrero, Locacion
-                    if entityType == cls.getEntityTypesDict()['Establecimiento'][0]:
-                        establecimiento = retValue
-                    else:
-                        establecimiento = kwargs['fldFK_Establecimiento']   # Implementar codigo para buscar Establec.
-                    tblEntity.setVal(0, fldFK_Establecimiento=establecimiento)
-                    retValue = setRecord(cls.__tblEntitiesName, **tblEntity.unpackItem(0))
-
-                # Todo el codigo de este bloque OBSOLETO (al usar el container Tree en tabla Geo Entidades)
-                containersValidated = []
-                for j in range(len(argsContainers)):
-                    if argsContainers[j] in entitiesCol:
-                        containersValidated.append(argsContainers[j])
-                print(f'CONTAINERSVALIDATED: {containersValidated}', dismiss_print=DISMISS_PRINT)
-                if len(containersValidated) > 0:
-                    tblContainerEntities = setupArgs(cls.__tblContainingEntitiesName, *args, **kwargs)
-                    for j in range(len(containersValidated)):  # Crea registros en tabla [Geo Entidad Container]
-                        tblContainerEntities.setVal(0, fldFK_GeoEntidad=retValue, fldFK_EntidadContainer=containersValidated[j])
-
-                    for k in range(1, 100):       # Codigo de prueba: setRecords() escribe 100 records en 220 msec!!
-                        tblContainerEntities.setVal(k, **tblContainerEntities.unpackItem(0))  # Test lines. REMOVE
-
-                    # TODO: con el campo Container Tree en tabla GeoEntidades, ContainerEntities se hace obsoleta
-                    idx_list = tblContainerEntities.setRecords()
-                    print(f'\nidx_list = {idx_list}\n', dismiss_print=DISMISS_PRINT)
-
-                print(f'Container Tree: {containerTree}', dismiss_print=DISMISS_PRINT)
-        return retValue
-
-    @classmethod
-    def entitySetState(cls, entityID, *args, **kwargs):
-        """
-        @param entityID: fldID in [Geo Entidades] for which values are to be set.
-        @param args: DataTable with parameters to set on record entityID
-        @param kwargs: dictionary with pararms to set on record entityID. Overrides values in args in case of match.
-        @return: entityID of successful (int) / errorCode (str) if error.
-        """
-        argTable = setupArgs(cls.__tblEntitiesName, *args, *kwargs)
-        entityWrtTable = setupArgs(cls.__tblEntitiesName, None, argTable.unpackItem(0))  # Toma primer registro(item 0)
-        if entityID > 0:
-            entityWrtTable.setVal(0, fldID=entityID)
-        temp = getRecords(cls.__tblEntitiesName, '', '', None, '*', fldID=entityWrtTable.getVal(0, 'fldID'))
-        if type(temp) is str:       # Verifica que record exista en tabla [Geo Entidades]
-            retValue = f'ERR_INP_Invalid Argument: ID_Entidad - Function/Method: entitySetState()'
+        tblEntity = next((j for j in args if j.tblName == cls.__tblObjectsName), None)
+        tblEntity = tblEntity if tblEntity is not None else DataTable(cls.__tblObjectsName, *args, **kwargs)
+        entity_type_id = tblEntity.getVal(0, 'fldFK_TipoDeEntidad', None)
+        if entity_type_id is None and removeAccents(entity_type) not in cls.getLocalizLevelsDict():
+            retValue = f'ERR_INP_Invalid Argument Entity Type: {entity_type}'
             krnl_logger.info(retValue)
+            return retValue
         else:
-            retValue = entityWrtTable.setRecords()
-        return retValue
-
-    @classmethod
-    def entityGetState(cls, entityID, *args):
-        """
-        Returns fields requested in *args for entityID. if args == '*', returns DataTable with ALL fields for entityID
-        @param entityID:
-        @param args: field Names to return values for. * or args=None returns all fields in table [Geo Entidades]
-        @return: dataTable for GeoEntity with fldID=entityID. 1 record only -> the one matching with entityID.
-        """
-        if entityID > 0:
-            args = [j for j in args if not isinstance(j, str)] + [j.strip() for j in args if isinstance(j, str)]
-            if not args or '*' in args:       # returns all fields for Entity.
-                temp = getRecords(cls.__tblEntitiesName, '', '', None, '*', fldID=entityID)
-            else:
-                temp = getRecords(cls.__tblEntitiesName, '', '', None, args, fldID=entityID) #Returns selected fields
-            if type(temp) is str:
-                retValue = f'ERR_RecordNotFound: ID_Entidad - unction/Method: entityGetState()'
-            else:
-                retValue = temp
-        else:
-            retValue = f'ERR_INP_Invalid Argument: ID_Entidad'
-        if isinstance(retValue, str):
+            entity_type_from_tbl = next((k for k in cls.getLocalizLevelsDict()
+                                         if cls.getLocalizLevelsDict()[k] == entity_type_id), None)
+            entity_type = entity_type_from_tbl if entity_type_from_tbl is not None else removeAccents(entity_type)
+            entity_type_id= entity_type_id if entity_type_id is not None else cls.getLocalizLevelsDict()[entity_type][4]
+            entity_type_level = cls.getLocalizLevelsDict()[entity_type][0]
+            entity_mandatory_level = cls.getLocalizLevelsDict()[entity_type][3]
+            state_entity= bool(state_entity) if state_entity is not None else cls.getLocalizLevelsDict()[entity_type][2]
+        containers_from_tbl = tblEntity.getVal(0, 'fldContainers', None)
+        if containers_from_tbl is not None:
+            containers = containers_from_tbl
+        if isinstance(containers, Geo):
+            containers = [containers, ]
+        elif not isinstance(containers, (list, tuple)):
+            retValue = f'ERR_INP_Invalid Arguments. Mandatory container entities not valid or missing.'
             krnl_logger.info(retValue)
+            return retValue
 
-        return retValue
+        # filtra solo containers que sean Geo y con localizLevel apropiado
+        containers = [j for j in containers if isinstance(j, Geo) and j.localizLevel < entity_type_level]
+        full_list = []
+        for e in containers:
+            full_list.extend(e.container_tree)
+        full_list_localiz_level = [j.localizLevel for j in list(set(full_list))]  # Lista de localizLevel del Tree.
+        if not full_list_localiz_level or all(j > entity_mandatory_level for j in full_list_localiz_level):
+            retValue = f'ERR_INP_Invalid Arguments. Mandatory container entities not valid or missing.'
+            krnl_logger.info(retValue)
+            return retValue          # Sale si no se paso Mandatory Container requerido para ese localizLevel.
 
-    @classmethod
-    def entityGetID(cls, *args, **kwargs):               # **kwargs Mandatory: Name, TipoDeEntidad
+        name_from_tbl = tblEntity.getVal(0, 'fldName', None)
+        name = name_from_tbl if name_from_tbl is not None else name
+        name = removeAccents(name, str_to_lower=False)      # Remueve acentos, mantiene mayusculas.
+        abbrev = abbrev if abbrev is not None else tblEntity.getVal(0, 'fldAbbreviation', None)
+        abbrev = abbrev.strip().upper() if isinstance(abbrev, str) else None
+        timeStamp = tblEntity.getVal(0, 'fldTimeStamp', None) or time_mt('datetime')
+        user = tblEntity.getVal(0, 'fldFK_UserID', None) or sessionActiveUser
+        containers_ids = [j.ID for j in containers]
+        tblEntity.setVal(0, fldTimeStamp=timeStamp, fldFK_NivelDeLocalizacion=entity_type_level, fldName=name,fldFlag=1,
+                         fldObjectUID=str(uuid4().hex), fldAbbreviation=abbrev, fldFlag_EntidadEstado=state_entity,
+                         fldContainers=containers_ids, fldFK_TipoDeEntidad=entity_type_id, fldFK_UserID=user)
+        idRecordGeo = setRecord(tblEntity.tblName, **tblEntity.unpackItem(0))
+        if isinstance(idRecordGeo, str):
+            retValue = f'ERR_DBAccess: Could not write to table {tblEntity.tblName}. Geo Entity not created.'
+            krnl_logger.info(retValue)
+            return retValue
+
+        tblEntity.setVal(0, fldID=idRecordGeo, fldContainers=containers)        # Must use Geo Objects for containers.
+        entityObj = cls(**tblEntity.unpackItem(0))      # Crea objeto Geo y lo registra.
+        entityObj._generate_container_tree()
+        entityObj.register()
+        return entityObj
+
+
+    def removeGeoEntity(self):
+        """ Removes from __registerDict and sets as Inactive in datbase (for now, to avoid deleting records)
+        Sets datetime of 'removal' in db record's fldComment
         """
-        Returns fldID for GeoEntity identified with Name and TipoDeEntidad
-        @param args: Not used. For future developments
-        @param kwargs: fldName and fldFK_TipoDeEntidad, Country (Pais) for required Entity. Mandatory: Pais.
-        @return: DataTable Object with GeoEntity obj_data if ok / errorCode: str. THERE MAY BE MORE THAN 1 RECORD if the
-        trio Name/TipoDeIdentidad/Pais matches more than one record. In that case lists all records with matching Name
-        and TipoDeEntidad.
-        """
-        if kwargs:
-            for k in kwargs:
-                if isinstance(k, str):
-                    kwargs[k.strip()] = kwargs[k]
-                    kwargs.pop(k)
-
-            if 'fldFK_Pais' not in kwargs:
-                retValue = f'ERR_InvalidArgument: Missing Argument(s) Pais(Country) - Function/Method: entityGetID()'
-                print(f'GEO.PY({lineNum()} - {retValue})')
-            entityName = kwargs.pop('fldName', '').strip()
-            entityNameNormalized = removeAccents(entityName)
-            temp = getRecords(cls.__tblEntitiesName, '', '', None, '*', **kwargs)
-            namesCol = temp.getCol('fldName')
-            for j, name in enumerate(namesCol):
-                if removeAccents(name) == entityNameNormalized:
-                    kwargs['fldName'] = f'"{entityName}"'
-                    temp = getRecords(cls.__tblEntitiesName, '', '', None, '*', **kwargs)
-                    break
-            retValue = temp
-        else:
-            retValue = f'ERR_InvalidArgument: Missing Arguments - Function/Method: entityGetID()'
-        return retValue
-
-    @classmethod
-    def getContainerEntities(cls, idEntity=None, mode=0):
-        """
-        Produces all containing entities for idEntity. If idEntity is not valid returns error string
-        @param idEntity:
-        @param mode: 0: returns LIST of Container Entities IDs.
-                     1: returns DICT of the form {ID_ContainerID: ID_TipoDeEntidad, }
-        @return: List or Dictionary as per mode value. None if no Container Entities are found. errorCode (str) if Error
-        """
-        if not idEntity or not isinstance(idEntity, int):
-            return None
-
-        temp = getRecords(cls.__tblEntitiesName, '', '', None, '*', fldID=idEntity)
-        if temp.dataLen == 0:
-            return [] if mode == 0 else {}
-        treeDict = temp.getVal(0, 'fldContainerTree')
-        if mode == 0:
-            return tuple([int(j) for j in treeDict]) if treeDict else []
-        return {int(j): treeDict[j] for j in treeDict} if treeDict else {}
+        self.unRegister()
+        return setRecord(self.__tblObjectsName, fldID=self.__recordID, fldFlag=0, fldComment=f'Record set to Inactive '
+                                                                                  f'on {time_mt("datetime")}')
 
 
-    # def getContainerEntities00(self, idEntity, mode=0):
-    #     """
-    #     Produces all containing entities for idEntity. If idEntity is not valid returns error string
-    #     @param idEntity:
-    #     @param mode: 0: returns LIST of Container Entities IDs.
-    #                  1: returns DICT of the form {ID_ContainerID: ID_TipoDeEntidad, }
-    #     @return: List or Dictionary as per mode value. None if no Container Entities are found. errorCode (str) if Error
-    #     """
-    #     level = 0
-    #     containers = [[idEntity]]       # List of Lists to manage entities by level
-    #     containersTypes = []            # Lista testigo y CONTADOR del numero de veces que aparece cada TipoDeEntidad
-    #     containersConsolidated = []     # List to consolidate results from each level into one single list
-    #     containersDepartamentos = []    # List of containers to all Departamentos/Counties found in the search
-    #     retValue = []
-    #     while level >= 0:
-    #         # 1. Gets list of container entities
-    #         temp1 = getRecords(Geo.__tblContainingEntitiesName, '', '', None, '*', fldFK_GeoEntidad=containers[level])
-    #         # print(f'GEO.PY({lineNum()}) - Containing Entities: {temp1.dataList}')
-    #         if type(temp1) is str or not temp1.dataLen:
-    #             errorMsg = f'ERR_RecordNotFound for ID_Entidad={idEntity} - Function/ActivityMethod: Geo.getContainerEntities()'
-    #             print(f'GEO.PY({lineNum()}) - {errorMsg}')
-    #             return retValue
-    #         # Creates a list of container entities for Departamentos only, to disambiguate multiple entities
-    #         temp1EntitiesCol = temp1.getCol('fldFK_GeoEntidad')
-    #         temp2 = getRecords(Geo.__tblEntitiesName, '', '', None, '*', fldID=temp1EntitiesCol)
-    #         temp2EntitiesTypes = temp2.getCol('fldFK_TipoDeEntidad')
-    #         for i in range(len(temp2EntitiesTypes)):
-    #             if temp2EntitiesTypes[i] == self.getEntityTypesDict()['Departamento'][0]:
-    #                 for j in range(temp1.dataLen):
-    #                     if temp1EntitiesCol[i] == temp1.getVal(j, 'fldFK_GeoEntidad'):
-    #                         containersDepartamentos.append(temp1.getVal(j, 'fldFK_EntidadContainer'))
-    #         # print(f'GEO.PY({lineNum()}) - Departamentos Containers: {containersDepartamentos}')
-    #
-    #         tblAuxList = temp1.getCol('fldFK_EntidadContainer')     # Checks for end of loop
-    #         if temp1.dataLen == 0 or not temp1.dataLen or not tblAuxList[0]:
-    #             break       # Sale si no se encuentran mas container Entities en tabla [Geo Entidades Container]
-    #
-    #         if level == 0:              # Pulls multiples map for entityType corresponding to idEntity
-    #             temp = getRecords(Geo.__tblEntitiesName, '', '', None, '*', fldID=idEntity)
-    #             multiplesList = []
-    #             multiplesString = ''
-    #             multiplesStr = ''
-    #             idEntityType = temp.getVal(0, 'fldFK_TipoDeEntidad')
-    #             for i in self.getEntityTypesDict():
-    #                 if self.getEntityTypesDict()[i][0] == idEntityType:
-    #                     multiplesString = self.getEntityTypesDict()[i][2]
-    #                     break
-    #             if multiplesString:
-    #                 # Pulls list of Entity Types with multiple values for idEntity
-    #                 for j in range(len(multiplesString)):
-    #                     multiplesStr += multiplesString[j] if multiplesString[j].isnumeric() or multiplesString[j] == ',' else ''
-    #                 multiplesList = multiplesStr.split(',')
-    #                 try:
-    #                     multiplesList = [int(i) for i in multiplesList]
-    #                 except (TypeError, IndexError, ValueError):
-    #                     retValue = f'ERR_DBValueNotValid - Function/ActivityMethod Geo.createGeoEntity()'
-    #                     print(f'GEO.PY({lineNum()}) - {retValue}')
-    #                     return retValue
-    #
-    #         auxContainerList = []
-    #         for j in range(len(tblAuxList)):
-    #             if tblAuxList[j] not in auxContainerList:
-    #                 auxContainerList.append(tblAuxList[j])
-    #
-    #         # 2. Gets the Type of the elements in the containerEntititesList
-    #         temp2 = getRecords(Geo.__tblEntitiesName, '', '', None, '*', fldID=auxContainerList)
-    #         if type(temp2) is str:
-    #             errorMsg = f'ERR_RecordNotFound for ID_Entidad={auxContainerList} - Function/ActivityMethod: Geo.getContainerEntities()'
-    #             print(f'GEO.PY({lineNum()}) - {errorMsg}')
-    #             return retValue
-    #         auxContainerTypesList = temp2.getCol('fldFK_TipoDeEntidad')
-    #
-    #         level += 1
-    #         auxList = []
-    #         for i in range(len(auxContainerTypesList)):             # Verifica Tipos de Entidad. Valida multiples
-    #             if len(containersDepartamentos) > 0 and self.getEntityTypesDict()['Pais'][0] < auxContainerTypesList[i] \
-    #                     < self.getEntityTypesDict()['Departamento'][0] and auxContainerList[i] not in containersDepartamentos:
-    #                 pass   # Sale si es Entidad Container de Departamento pero no esta en lista de Departamentos
-    #             else:
-    #                 if auxContainerTypesList[i] in multiplesList:
-    #                     auxList.append(auxContainerList[i])
-    #                     if auxContainerList[i] not in containersConsolidated:
-    #                         containersConsolidated.append(auxContainerList[i])
-    #                 else:
-    #                     if containersTypes.count(auxContainerTypesList[i]) == 0:
-    #                         auxList.append(auxContainerList[i])
-    #                         if auxContainerList[i] not in containersConsolidated:
-    #                             containersConsolidated.append(auxContainerList[i])
-    #                 containersTypes.append(auxContainerTypesList[i])    # Actualiza lista de container types encontrados
-    #         containers.append(auxList)                              # Actualiza containers (Lista de Listas)
-    #     # ----------------------------------- End while --------------------------------------------
-    #
-    #     # containersConsolidated = list(set(containersConsolidated))      # Elimina duplicados de lista final
-    #     if mode == 0:           # Retorna lista de ID_Entidad de todas las Entidades Container de idEntity
-    #         retValue = containersConsolidated
-    #     else:       # mode=1 -> retorna diccionario {ID_ContainerID: ID_TipoDeEntidad, }
-    #         temp = getRecords(Geo.__tblEntitiesName, '', '', None, '*', fldID=containersConsolidated)
-    #         if type(temp) is str:
-    #             retValue = f'{temp} - Function/ActivityMethod: Geo.getContainerEntities()'
-    #             print(f'GEO.PY({lineNum()}) - {retValue}')
-    #             return retValue
-    #         # print(temp)
-    #         keys = temp.getCol('fldID')
-    #         values = temp.getCol('fldFK_TipoDeEntidad')
-    #         if len(keys) == 0 or len(values) == 0:
-    #             retValue = None
-    #         else:
-    #             retValue = dict(zip(keys, values))
-    #     return retValue
 
+# ---------------------------------------------- End Class Geo --------------------------------------------------- #
 
-handlerGeo = Geo()
+# Complete initialization of Geo objects and data interfacess. Create Container Trees for Geo objects.
+# TODO: Got to do this here. Cannot do in loadFromDB_old()!!.
+for o in Geo.getGeoEntities().values():
+    # print(f'Geo Object: {o.name}')
+    o._generate_container_tree()
+
+# These adapter / converter are used for 'ID_Localizacion' fields across the DB. NOT USED WITH THE Geo Tables, though..
+sqlite3.register_adapter(Geo, adapt_geo_to_UID)    # Serializes Geo to int, to store in DB.
+sqlite3.register_converter('GEOTEXT', convert_to_geo)  # Converts int to a Geo object querying getGeoEntities() by UUID.
+krnl_logger.info('Geo structure initialized successfully.\n')
+# ---------------------------------------------------------------------------------------------------------------- #

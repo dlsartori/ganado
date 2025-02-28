@@ -1,14 +1,22 @@
 # import weakref
+# from __future__ import annotations
+import itertools
 import sqlite3
-from krnl_exceptions import DBAccessError
-from krnl_config import db_logger, krnl_logger, callerFunction,  singleton, MAIN_DB_NAME, strError, TERMINAL_ID, \
-    CLIENT_MIN_INDEX, CLIENT_MAX_INDEX, NEXT_BATCH_MIN_INDEX, NEXT_BATCH_MAX_INDEX, print, DISMISS_PRINT, connCreate, \
-    DATASTREAM_DB_NAME, DB_REPLICATE
-from random import randrange
+from collections.abc import Iterable
+import pandas as pd
+import numpy as np          # used to split dataframes in chunks for writing to db.
+from uuid import uuid4
 
-from krnl_sqlite import getFldName, getTblName, SQLiteQuery, set_reloadFields
+from krnl_exceptions import DBAccessError
+from krnl_config import db_logger, krnl_logger, callerFunction,  singleton, MAIN_DB_NAME, NR_DB_NAME, \
+    strError, TERMINAL_ID, print, DISMISS_PRINT, DATASTREAM_DB_NAME, DB_REPLICATE, fDateTime, PANDAS_WRT_CHUNK_SIZE, \
+    PANDAS_READ_CHUNK_SIZE
+# from random import randrange
+from krnl_db_query import _DataBase, db_main, db_nr, SQLiteQuery, getFldName, getTblName, tables_in_query, \
+    DBAccessSemaphore, AccessSerializer
 from threading import Event, Lock, Thread
 from krnl_abstract_base_classes import AbstractAsyncBaseClass
+                                                            # Serializer lock for db access on a per-table basis.
 # from sqlite_ext import SqliteExtDatabase          # Not used for now. SqliteExtDatabase parent class not found.
 try:
     from Queue import Queue, PriorityQueue
@@ -24,20 +32,6 @@ except ImportError:
     GThread = GQueue = GEvent = None
 
 SENTINEL = object()     # Vamos a ver como funciona esto...
-
-_upload_exempted = ['tbl_Upload_To_Server', ]  # list of database tables that must not be uploaded to server.
-
-def update_fldUPDATE(fldUPDATE_dict: dict, db_fld_name, fld_value):
-    """ returns a python dictionary ready for JSON serialization. Callback for sqlite UPDATE Trigger.
-    @param fldUPDATE_dict: Dictionary originated from JSON, read from fldUPDATE field.
-    @param db_fld_name: fldName to add to dictionary
-    @param fld_value: field value.
-    @return: dictionary to store in fldUPDATE as JSON.
-     """
-    if isinstance(fldUPDATE_dict, dict):
-        fldUPDATE_dict.update({db_fld_name: fld_value})
-    return fldUPDATE_dict
-
 
 class ResultTimeout(Exception):
     pass
@@ -57,8 +51,8 @@ class AsyncCursor(object):
             retrieval methods that the results are available to the caller.
         3. On request, the Cursor methods provide the results if available, or wait() until available and return them.
     """
-    __slots__ = ('sql', 'params', 'commit', 'timeout', '_event', '_cursor', '_exc', '_idx', '_rows', '_ready', 'tbl',
-                 'fldID_idx', 'executemany')
+    __slots__ = ('sql', 'params', 'commit', 'timeout', '_event', '_cursor', '_exc', '_idx', '_rows', '_ready', '_tbl',
+                 'executemany')
 
     def __init__(self, event, sql, params, commit, timeout, tbl=None, fldID_idx=None, executemany=False):
         self._event = event
@@ -68,8 +62,8 @@ class AsyncCursor(object):
         self.timeout = timeout
         self._cursor = self._exc = self._idx = self._rows = None
         self._ready = False
-        self.tbl = tbl
-        self.fldID_idx = fldID_idx
+        self._tbl = tbl
+        # self.fldID_idx = fldID_idx
         self.executemany = executemany
 
     def set_result(self, cursor, exc=None):     # , *, items_written=None):
@@ -160,7 +154,7 @@ class Writer(object):
         while True:
             try:
                 if conn is None:  # Paused.
-                    print(f'aaaahhh: conn is None!. Callers: {callerFunction(getCallers=True)}')
+                    db_logger.info(f'aaaahhh: conn is None!. Callers: {callerFunction(getCallers=True)}')
                     if self.wait_unpause():
                         conn = self.database.connection()
                 else:
@@ -186,7 +180,7 @@ class Writer(object):
             db_logger.warning('writer paused, not handling %s', obj)
 
     def loop(self, conn):
-        obj = self.queue.get()          # TODO(cmt): This line waits here until an item is available in queue!
+        obj = self.queue.get()          # TODO(cmt): The thread sits here until an item is available in queue!
         if isinstance(obj, AsyncCursor):
             self.execute(obj)
         elif obj is PAUSE:
@@ -205,8 +199,8 @@ class Writer(object):
     def execute(self, obj):
         db_logger.debug('received query %s', obj.sql)
         try:
-            cursor = self.database._execute(obj.sql, obj.params, obj.commit, tbl=obj.tbl, fldID_idx=obj.fldID_idx,
-                                            executemany=obj.executemany)
+            cursor = self.database._execute(obj.sql, obj.params, obj.commit, executemany=obj.executemany,
+                                            tbl_name=obj._tbl)
         except (sqlite3.DatabaseError, sqlite3.Error, DBAccessError, Exception) as execute_err:
             cursor = None
             exc = execute_err  # python3 is so fucking lame.
@@ -217,7 +211,7 @@ class Writer(object):
         return obj.set_result(cursor, exc)
 
 
-# TODO(cmt): DEBE ser singleton, si no, la cosa se tranca...Por el acceso simultaneo a get_max_id().
+# TODO(cmt): DEBE ser singleton, si no, la cosa se tranca..
 class SqliteQueueDatabase(AbstractAsyncBaseClass):       #  class SqliteQueueDatabase(SqliteExtDatabase)
     """
     Implements interface to sqlite3 methods in a single-threaded, sequential access to sqlite3 functions, using queue.
@@ -225,6 +219,7 @@ class SqliteQueueDatabase(AbstractAsyncBaseClass):       #  class SqliteQueueDat
        - SQLiteQuery objects are a pool of DB connections to perform READ operations concurrently from different threads
        - SSqliteQueueDatabase objects are unique objects (singleton class) used to WRITE to DB, using a queue logic and
        writing from a single thread.
+    This class opens all connections in 'rw' mode.
     """
     __WAL_MODE_ERROR_MESSAGE = ('SQLite must be configured to use WAL (Write-Ahread Logging) '
                                 'journal mode. WAL mode allows readers to continue '
@@ -246,101 +241,104 @@ class SqliteQueueDatabase(AbstractAsyncBaseClass):       #  class SqliteQueueDat
 
 
     def __new__(cls, *args, **kwargs):  # __new__ func. to create SqliteQueueDatabase objs for multiple database names.
-        """Creates 1 SqliteQueueDatabase object for each database passed. Stores them in __instances dict, enabling
-        work with multiple databases by all threads in the system via this 'serializer' database access object.
+        """Creates 1 SqliteQueueDatabase object and 1 only for each database used. Stores them in __instances dict,
+        enabling work with multiple databases by all threads in the system via this 'serializer' database access object.
         After creation, always returns the same instance for each of the databases passed, as in a Singleton.
         __instances dict works as a pool of serializer-objects: 1 object for each database.
         """
         for o in cls.__instances:
-            if o.dbName == args[0]:     # args[0] is database argument.
+            if o.dbName == kwargs.get('db_name'):    # , MAIN_DB_NAME):     # kwargs['db_name'] is database argument.
                 return o                # If an object with the same database name exists, returns that object.
         o = super().__new__(cls)
         cls.__instances[o] = False      # Sets initialized flag to False, for __init__() to execute the 1st time only.
         return o
 
-    def __init__(self, database, *args, use_gevent=False, autostart=False, queue_max_size=None, results_timeout=None,
+    def __init__(self, *, db_name=None, use_gevent=False, autostart=True, queue_max_size=None, results_timeout=None,
                  sync_db_across_devices=False, **kwargs):
-        # if self.__initialized:                # These 3 commented lines of code used with Original __new__() above.
-        #     return
-        # self.__initialized = True
-
-        if self.__instances.get(self):
+        if self.__instances.get(self, None):
             return
-        self.__instances[self] = True       # Sets initialized value in __instances dict to avoid re-initialization.
 
+        self.__instances[self] = True       # Sets initialized value in __instances dict to avoid re-initialization.
         kwargs['check_same_thread'] = False
         self.__sync_db = sync_db_across_devices
         # Ensure that journal_mode is WAL. This value is passed to the parent class constructor below.
         pragmas = self._validate_journal_mode(kwargs.pop('pragmas', None))
 
         # TODO(cmt): Create DB Connection. Saves connection parameters.
-        self._database = database
+        self._database = db_name
         self._timeout = kwargs.get('timeout', 0)
         self._isolation_level = kwargs.get('isolation_level', None)
         self._detect_types = kwargs.get('detect_types', sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
         self._cached_statements = kwargs.get('cached_statements', 0)
         self._check_same_thread = kwargs.get('check_same_thread', False)        # Debe ser False para correr async??
-        self._uri = kwargs.get('uri', None)
+        self._uri = kwargs.get('uri', True)  # Must be True to be able to pass database as f'file:{database}?mode=rw'
         self._factory = kwargs.get('factory', None)
-        self._conn = self.connection(database, timeout=self._timeout, isolation_level=self._isolation_level,
-                                     detect_types=self._detect_types, cached_statements=self._cached_statements,
-                                     check_same_thread=self._check_same_thread, uri=self._uri, factory=self._factory)
-        self._autostart = autostart
-        self._results_timeout = results_timeout
-        self._is_stopped = True
-        self._writer = None
-        # ------------------------------------ Added code -------------------
-        self.__idxLowerLimit = CLIENT_MIN_INDEX if self.__sync_db else 1
-        self.__idxUpperLimit = CLIENT_MAX_INDEX if self.__sync_db else self.__SQLite_MAX_ROWS
-        self.__idxLowerLimit_Next = NEXT_BATCH_MIN_INDEX if self.__sync_db else 1
-        self.__idxUpperLimit_Next = NEXT_BATCH_MAX_INDEX if self.__sync_db else self.__SQLite_MAX_ROWS
-        # ---------------------------------------------------------
+        try:
+            self._conn = self.connection(self._database, timeout=self._timeout, isolation_level=self._isolation_level,
+                                         detect_types=self._detect_types, cached_statements=self._cached_statements,
+                                         check_same_thread=self._check_same_thread, uri=self._uri, factory=self._factory)
+        except (sqlite3.Error, sqlite3.OperationalError) as e:
+            val = f'ERR_DB_Cannot create connection:{e} - {callerFunction(getCallers=True)}. Database file: {db_name}.'
+            self._conn = None
+            db_logger.error(val)
+            raise DBAccessError(f'{val}')
+        else:
+            self._autostart = autostart
+            self._results_timeout = results_timeout
+            self._is_stopped = True
+            self._writer = None
 
-        # TODO: Ojo con esto. Aqui funciona, pero en el codigo original NO se hace el seteo a WAL.
-        cursor = self._conn.cursor()  # Ahora los pragmas, que vienen como un diccionario.
-        jm = cursor.execute(f'PRAGMA JOURNAL_MODE; ').fetchone()
-        if 'wal' not in str(jm).lower() and pragmas:
-            for k in pragmas:
-                sql_pragma = f' PRAGMA "{k}" = {pragmas[k]}; '
-                cursor.execute(sql_pragma)  # Ejecuta directamente, sin mandar al queue.
-        cursor.close()
+            # TODO: Ojo con esto. Aqui funciona, pero en el codigo original NO se hace el seteo a WAL.
+            cursor = self._conn.cursor()  # Ahora los pragmas, que vienen como un diccionario.
+            jm = cursor.execute(f'PRAGMA JOURNAL_MODE; ').fetchone()
+            if 'wal' not in str(jm).lower() and pragmas:
+                for k in pragmas:
+                    sql_pragma = f' PRAGMA "{k}" = {pragmas[k]}; '
+                    cursor.execute(sql_pragma)  # Ejecuta directamente, sin mandar al queue.
+            cursor.close()
 
-        # Get different objects depending on the threading implementation.
-        self._thread_helper = self.get_thread_implementation(use_gevent)(queue_max_size)  # ThreadHelper(queue_max_size)
+            # Get different objects depending on the threading implementation.
+            self._thread_helper = self.get_thread_implementation(use_gevent)(queue_max_size)  # ThreadHelper(queue_max_size)
 
-        super().__init__()
-        # Create the writer thread, optionally starting it.
-        self._create_write_queue()
-        if self._autostart:
-            self.start()
+            super().__init__()
+            # Create the writer thread, optionally starting it.
+            self._create_write_queue()
+            if self._autostart:
+                self.start()
 
     @property
     def dbName(self):
         return self._database
+    db_name = dbName
+
+    # @property
+    # def db_slock(self):
+    #     return self.__db_access_lock
 
     # TODO(cmt): Ad-hoc implementation of connection()
     def connection(self, database=None, timeout=0.0, detect_types=0, isolation_level=None, check_same_thread=True,
-                                     factory=None, cached_statements=0, uri=False):
+                                     factory=None, cached_statements=0, uri=None):     # uri=True for mode=rw
         database = database or self._database
         # Detect Types: JSON, TIMESTAMP columns (PARSE_DECLTYPES). Internal processing in sqlite3 via hook calls.
         detect_types = detect_types | sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
         factory = factory or self._factory
         if factory:
-            conn = sqlite3.connect(database, timeout=timeout, detect_types=detect_types,
+            conn = sqlite3.connect(f'file:{database}?mode=rw', timeout=timeout, detect_types=detect_types,
                                          isolation_level=isolation_level, check_same_thread=check_same_thread,
-                                         factory=factory, cached_statements=cached_statements, uri=uri)
+                                         factory=factory, cached_statements=cached_statements, uri=True)
+        # f'file:{database}?mode=rw'
         else:
-            conn = sqlite3.connect(database, timeout=timeout, detect_types=detect_types,
+            conn = sqlite3.connect(f'file:{database}?mode=rw', timeout=timeout, detect_types=detect_types,
                                          isolation_level=isolation_level, cached_statements=cached_statements,
-                                         check_same_thread=check_same_thread, uri=uri)
+                                         check_same_thread=check_same_thread, uri=True)
         return conn
 
 
     # TODO(cmt): Ad-hoc implementation of _execute()
-    # The last_insert_rowid() function returns the ROWID of the last row inserted by the database connection which
+    # sqlite3.last_insert_rowid() function returns the ROWID of the last row inserted by the database connection which
     # invoked the function. The last_insert_rowid() SQL function is a wrapper around the sqlite3_last_insert_rowid()
     # C/C++ interface function.
-    def _execute(self, sql, params='', commit=True, *, tbl='', fldID_idx=None, executemany=False):
+    def _execute(self, sql, params='', commit=True, *, executemany=False, tbl_name=None):
         """                TODO(cmt) ***** Este metodo llama a sqlite3 execute() OR executemany() *****
         IMPORTANTE: Escribe datos de retorno en params (valor de fldID generados por la llamada a executemany() ).
         Logica de uso de tbl, fldID_idx: cuando se pasan (!=None) la func. _execute() corre get_max_id y obtiene el
@@ -349,35 +347,16 @@ class SqliteQueueDatabase(AbstractAsyncBaseClass):       #  class SqliteQueueDat
         @param sql: strSQL
         @param params: parametros a pasar a execute() o executemany(). Es [] para execute() o [[]] para executemany
         @param commit: No usado
-        @param tbl: tblName
-        @param fldID_idx: indice de fldID en lista de params.
+        @param tbl_name: table name (starting with 'tbl').
         """
-
-        """ params_list es una REFERENCIA a params. Se usa este hecho para actualizar params con LOS fldID generados por
-        executemany() y pasarlos a la funcion llamadora, para que genere los records a guardar en _Upload_To_Server. """
+        # params_list es una REFERENCIA a params. Se usa este hecho para actualizar params con LOS fldID generados por
+        # executemany() y pasarlos a la funcion llamadora, para que genere los records a guardar en _Upload_To_Server.
         params_list = (params, ) if any(not isinstance(j, (list, tuple)) for j in params) else params
-        if tbl and fldID_idx is not None:
-            # max_id = self.__get_max_id(db_tbl_name=dbTblName, row_count=len(params))  # None si __get_max_id() falla.
-            if 'update' not in sql.lower():         # Solo entra a setear fldID si NO es UPDATE.
-                if self.__sync_db:
-                    dbTblName, tblIndex, selfIncrement, withoutROWID, bitmask, methodName = getTblName(tbl, 1)
-                    # selfIncrement means the table has INTEGER PRIMARY KEY and increments when ROWID=None is passed.
-                    max_id = self.__get_max_id(db_tbl_name=dbTblName, row_count=len(params_list))  # None si get_max_id falla
-                    # Asigna valor a fldID para crear registro nuevo. Si __get_max_id() falla, va por autoincremento.
-                    for count, j in enumerate(params_list):
-                        j[fldID_idx] = max_id+1+count if (max_id is not None and tbl not in _upload_exempted) else None
-                # else:
-                #     # Cuando __sync_db=False => fldID=None -> fuerza autoincrement de la tabla. Respeta valor si hay.
-                #     for count, j in enumerate(params_list):
-                #         j[fldID_idx] = None if (withoutROWID is False or tbl in _upload_exempted)\
-                #                             else (max_id + 1 + count if max_id is not None else None)
-                # TODO(cmt): Actualiza param para que func. llamadora acceda a los fldID generados por executemany()
-                # if any(not isinstance(j, (list, tuple)) for j in params):
-                #     params = params_list[0]  # Esto debiera ser todo lo que se necesita.... Ma' ver????
-                # else:
-                #     params = params_list   # Esta linea NO DEBIERA necesitarse.TODO: CHEQUEAR si hace falta.
-
-        with self._conn:        # Doing this because of the commit()s to be performed. Need to delve deeper into it.
+        with self._conn:        # Doing this because of the commit() on __exit__() from the context mgr.
+            if tbl_name:        # Some sql statements (PRAGMA, etc.) may not carry tbl_name.
+                semaphore = DBAccessSemaphore(tbl_name, db_name=self.db_name)
+                # print(f'---------Locks dict({len(tbl_lock._get_resources_dict())}): {tbl_lock._get_resources_dict()}')
+                semaphore.acquire(timeout=1)  # Passes on 1st call to acquire(). All subsequent calls on tbl_name wait.
             try:
                 if not executemany:
                     cur = self._conn.execute(sql, params)        # TODO(cmt): Actual call to sqlite3.execute()
@@ -389,81 +368,88 @@ class SqliteQueueDatabase(AbstractAsyncBaseClass):       #  class SqliteQueueDat
                     cur = self._conn.executemany(sql, params_list)    # TODO(cmt): Actual call to sqlite3.executemany()
                     # The cur.rowcount below works ONLY because a fetch()/fetchall() was executed in AsyncCursor code.
                     if cur.rowcount != len(params_list):  # Valida records escritos. Si hay error, genera Exception.
-                        raise sqlite3.DatabaseError(f'ERR_DBAccess: setRecords()-executemany() call failed. Data could'
+                        raise sqlite3.DatabaseError(f'ERR_DBAccess: setrecords()/executemany() call failed. Data could'
                                                     f' not be written. sql={sql}.')
             except (sqlite3.Error, sqlite3.DatabaseError, sqlite3.OperationalError, Exception) as e:
                 self._conn.rollback()
                 cur = f'ERR_DBAccess: AsyncCursor _execute() error: {e}.'
                 db_logger.critical(cur)
-                print(cur, dismiss_print=DISMISS_PRINT)
-                raise DBAccessError(f'SQLiteQueueDataBase Exception: {cur}')      # NO eliminar este raise !!
+                if tbl_name:
+                    #     self.__db_access_lock.release(tbl_name=tbl_name)
+                    semaphore.release()
+                raise sqlite3.DatabaseError(f'SQLiteQueueDataBase Exception: {cur}')      # NO eliminar este raise !!
+
+            if tbl_name:
+                semaphore.release()      # Notifies waiting thread that it can now access tbl_name.
+
         return cur          # type(cur) = str when returning write error.
 
 
     # ------------------------------------------ Added Code ---------------------------------------------
 
+    # TODO(cmt): 29-Dec-23 (Mexico) -> FUNCTION IS DEPRECATED. NO LONGER NEEDED as of 4.1.9
     # TODO(cmt): re-entry should NOT be an issue with this function as access to it is 'serialized' by the write queue.
     #  Hence, locks shouldn't be required. This assumes that __get_max_id is called only from SqliteQueueDatabase class.
     #  There is a BIG time distance between fetching an idx and writing a record to DB->This method CANNOT BE REENTRANT!
-    def __get_max_id(self, tbl=None, *, row_count=1, db_tbl_name=''):
-        """
-        Returns MAXID for Table and WITHOUT_ROWID for Table if requested (get_without_rowid=True)
-        @param tbl: Table Name.
-        @param row_count: 1 default (!=1 when used with executemany())
-        @param db_tbl_name: DB table name passed instead of plain tblName. If passed, takes precedence over tbl.
-        @return: max_id (int) for table. None if function fails and a valid max_id cannot be obtained.
-        """
-        if db_tbl_name:
-            dbTblName = db_tbl_name         # TODO(cmt): OJO: NO CHECKS MADE on db_tbl_name. Must be correct!!
-        else:
-            dbTblName = getTblName(tbl, 0)
-            if strError in dbTblName:
-                return None
-
-        # upload-exempted usan todo el rango de indices (desde 1). No escriben en bloques como el resto.
-        low_lim = self.__idxLowerLimit if tbl not in _upload_exempted else 1
-        upp_lim = self.__idxUpperLimit if tbl not in _upload_exempted else self.__SQLite_MAX_ROWS
-        # string para without_rowid=False  (100% de los casos, debiera ser)
-        strMaxId = f'SELECT IFNULL(MAX(ROWID),{low_lim}) FROM [{dbTblName}]' + \
-                   f' WHERE ROWID >= {low_lim} AND ROWID <= {upp_lim};' if tbl not in _upload_exempted else '; '
-
-        # strMaxId1 = f'SELECT IFNULL(MAX(ROWID),{low_lim}) FROM [{dbTblName}] WHERE ' \
-        #            f'ROWID >= {low_lim} AND ROWID <= {upp_lim};'
-
-        # with self.__lock:
-        try:        # La ejecucion de este try permite sincronizar la columna oculta ROWID con la fldID declarada.
-            cur = self._conn.execute(strMaxId)
-            idx = cur.fetchone()[0]
-            if self.__sync_db and tbl not in _upload_exempted and idx + row_count > self.__idxUpperLimit:
-                self.__idxLowerLimit = self.__idxLowerLimit_Next  # Pasa al siguente batch asignado.
-                self.__idxUpperLimit = self.__idxUpperLimit_Next  # Tabla [Index Batches] asignados a cada dbName
-                idx = self.__idxLowerLimit - 1        # TODO(cmt): Esta asignacion funciona tambien para executemany()
-        except (sqlite3.Error, sqlite3.DatabaseError):
-            idx = None
-
-        if idx is None:             # si tbl es WITHOUT ROWID, debe usar dbFldName en vez de ROWID.
-            fldID_dbName = getFldName(tbl, 'fldID')
-            if strError in fldID_dbName:
-                return None         # Retorna None si hay error en obtencion de dbFldName.
-            # string para without_rowid=True  (Solo tablas especificamente creadas como WITHOUT ROWID. NO debiera haber)
-            strMaxId = f'SELECT IFNULL(MAX([{fldID_dbName}]),{low_lim}) FROM [{dbTblName}]' +\
-                       f' WHERE [{fldID_dbName}] >= {low_lim} AND [{fldID_dbName}] <= {upp_lim};' \
-                        if tbl not in _upload_exempted else '; '
-
-            # strMaxId2 = f'SELECT IFNULL(MAX([{fldID_dbName}]),{low_lim}) FROM [{dbTblName}] WHERE ' \
-            #            f'[{fldID_dbName}] >= {low_lim} AND [{fldID_dbName}] <= {upp_lim};'
-
-            try:     # Este try se ejecuta si tbl NO es WITHOUT ROWID. (No debiera haber ninguna de esas en DB)
-                cur = self._conn.execute(strMaxId)
-                idx = cur.fetchone()[0]
-                if self.__sync_db and tbl not in _upload_exempted and idx + row_count > self.__idxUpperLimit:
-                    self.__idxLowerLimit = self.__idxLowerLimit_Next  # Pasa al siguente batch asignado.
-                    self.__idxUpperLimit = self.__idxUpperLimit_Next  # Tabla [Index Batches] asignados a cada dbName
-                    idx = self.__idxLowerLimit - 1
-            except (sqlite3.Error, sqlite3.DatabaseError):
-                pass    # idx = None
-
-        return idx
+    # def __get_max_id(self, tbl=None, *, row_count=1, db_tbl_name=''):
+    #     """
+    #     Returns MAXID for Table and WITHOUT_ROWID for Table if requested (get_without_rowid=True)
+    #     @param tbl: Table Name.
+    #     @param row_count: 1 default (!=1 when used with executemany())
+    #     @param db_tbl_name: DB table name passed instead of plain tblName. If passed, takes precedence over tbl.
+    #     @return: max_id (int) for table. None if function fails and a valid max_id cannot be obtained.
+    #     """
+    #     if db_tbl_name:
+    #         dbTblName = db_tbl_name         # TODO(cmt): OJO: NO CHECKS MADE on db_tbl_name. Must be correct!!
+    #     else:
+    #         dbTblName = getTblName(tbl, 0)
+    #         if strError in dbTblName:
+    #             return None
+    #
+    #     # upload-exempted usan todo el rango de indices (desde 1). No escriben en bloques como el resto.
+    #     low_lim = self.__idxLowerLimit if tbl not in _upload_exempted else 1
+    #     upp_lim = self.__idxUpperLimit if tbl not in _upload_exempted else self.__SQLite_MAX_ROWS
+    #     # string para without_rowid=False  (100% de los casos, debiera ser)
+    #     strMaxId = f'SELECT IFNULL(MAX(ROWID),{low_lim}) FROM [{dbTblName}]' + \
+    #                f' WHERE ROWID >= {low_lim} AND ROWID <= {upp_lim};' if tbl not in _upload_exempted else '; '
+    #
+    #     # strMaxId1 = f'SELECT IFNULL(MAX(ROWID),{low_lim}) FROM [{dbTblName}] WHERE ' \
+    #     #            f'ROWID >= {low_lim} AND ROWID <= {upp_lim};'
+    #
+    #     # with self.__lock:
+    #     try:        # La ejecucion de este try permite sincronizar la columna oculta ROWID con la fldID declarada.
+    #         cur = self._conn.execute(strMaxId)
+    #         idx = cur.fetchone()[0]
+    #         if self.__sync_db and tbl not in _upload_exempted and idx + row_count > self.__idxUpperLimit:
+    #             self.__idxLowerLimit = self.__idxLowerLimit_Next  # Pasa al siguente batch asignado.
+    #             self.__idxUpperLimit = self.__idxUpperLimit_Next  # Tabla [Index Batches] asignados a cada dbName
+    #             idx = self.__idxLowerLimit - 1        # TODO(cmt): Esta asignacion funciona tambien para executemany()
+    #     except (sqlite3.Error, sqlite3.DatabaseError):
+    #         idx = None
+    #
+    #     if idx is None:             # si tbl es WITHOUT ROWID, debe usar dbFldName en vez de ROWID.
+    #         fldID_dbName = getFldName(tbl, 'fldID')
+    #         if strError in fldID_dbName:
+    #             return None         # Retorna None si hay error en obtencion de dbFldName.
+    #         # string para without_rowid=True  (Solo tablas especificamente creadas como WITHOUT ROWID. NO debiera haber)
+    #         strMaxId = f'SELECT IFNULL(MAX([{fldID_dbName}]),{low_lim}) FROM [{dbTblName}]' +\
+    #                    f' WHERE [{fldID_dbName}] >= {low_lim} AND [{fldID_dbName}] <= {upp_lim};' \
+    #                     if tbl not in _upload_exempted else '; '
+    #
+    #         # strMaxId2 = f'SELECT IFNULL(MAX([{fldID_dbName}]),{low_lim}) FROM [{dbTblName}] WHERE ' \
+    #         #            f'[{fldID_dbName}] >= {low_lim} AND [{fldID_dbName}] <= {upp_lim};'
+    #
+    #         try:     # Este try se ejecuta si tbl NO es WITHOUT ROWID. (No debiera haber ninguna de esas en DB)
+    #             cur = self._conn.execute(strMaxId)
+    #             idx = cur.fetchone()[0]
+    #             if self.__sync_db and tbl not in _upload_exempted and idx + row_count > self.__idxUpperLimit:
+    #                 self.__idxLowerLimit = self.__idxLowerLimit_Next  # Pasa al siguente batch asignado.
+    #                 self.__idxUpperLimit = self.__idxUpperLimit_Next  # Tabla [Index Batches] asignados a cada dbName
+    #                 idx = self.__idxLowerLimit - 1
+    #         except (sqlite3.Error, sqlite3.DatabaseError):
+    #             pass    # idx = None
+    #
+    #     return idx
 
 
     def _close(self, conn):
@@ -502,7 +488,7 @@ class SqliteQueueDatabase(AbstractAsyncBaseClass):       #  class SqliteQueueDat
 
 
     # @timerWrapper(iterations=30)          # 40 - 80 usec avg for 30 iterations.
-    def execute_sql(self, sql, params='', commit=False, timeout=None, *, tbl=None, fldID_idx=None):
+    def execute_sql(self, sql, params='', commit=False, timeout=None, tbl_name=None):
         """ execute method for external calls. Puts the cursor object on the queue to be processed by the writer
             This is the interface call for setRecord() and setRecords() methods.
             In order to run sqlite3.executemany(), set argument executemany=True.
@@ -517,11 +503,12 @@ class SqliteQueueDatabase(AbstractAsyncBaseClass):       #  class SqliteQueueDat
                 params=params,
                 commit=commit,  # commit is False for SQLite, according to the docs.
                 timeout=self._results_timeout if timeout is None else timeout,
-                tbl=tbl, fldID_idx=fldID_idx,
+                tbl=tbl_name,  # tbl used to setup the access serializer lock.
+                # fldID_idx=fldID_idx,
                 executemany=False
             )
             # print(f' AsyncCursor init. {tbl}, fldID_idx={fldID_idx}')
-            self._write_queue.put(cursor)
+            self._write_queue.put(cursor)           # Sends cursor to writer thread, por sequential writes to db.
             return cursor
         else:
             if all(j in sql.lower().strip() for j in ('pragma', 'journal_mode')):
@@ -536,7 +523,7 @@ class SqliteQueueDatabase(AbstractAsyncBaseClass):       #  class SqliteQueueDat
                 raise sqlite3.DatabaseError(f'Exception in {self.__class__.__name__}.execute_sql(). Error code: {e}')
 
 
-    def executemany_sql(self, sql, params='', commit=False, timeout=None, *, tbl=None, fldID_idx=None):
+    def executemany_sql(self, sql, params='', commit=False, timeout=None, tbl_name=None):
         """ execute method for external calls. Puts the cursor object on the queue to be processed by the writer
                     This is the interface call for setRecord() and setRecords() methods.
                     In order to run sqlite3.executemany(), set argument executemany=True.
@@ -549,9 +536,10 @@ class SqliteQueueDatabase(AbstractAsyncBaseClass):       #  class SqliteQueueDat
                 event=self._thread_helper.event(),
                 sql=sql,
                 params=params,
-                commit=commit,  # commit is False for SQLite, according to the docs.
+                commit=commit,              # commit is False for SQLite, according to the docs.
                 timeout=self._results_timeout if timeout is None else timeout,
-                tbl=tbl, fldID_idx=fldID_idx,
+                tbl=tbl_name,  # tbl used to setup the access serializer lock.
+                # fldID_idx=fldID_idx,
                 executemany=True
             )
             # print(f' AsyncCursor init. {tbl}, fldID_idx={fldID_idx}')
@@ -590,7 +578,6 @@ class SqliteQueueDatabase(AbstractAsyncBaseClass):       #  class SqliteQueueDat
         with self.__lock:
             if self._is_stopped:  # buffer_writers_stop_events is set -> inserta SHUTDOWN en queue.
                 return False
-
             if self._database in self.buffer_writers_stop_events:
                 #  TODO(cmt): self.buffer_writers_stop_events[self._database].clear() NO DEBE IR AQUI porque event esta
                 #   ligado SOLAMENTE al estado run/stop de AsyncBuffers y Event set()/clear() se setean desde ahi.
@@ -602,10 +589,10 @@ class SqliteQueueDatabase(AbstractAsyncBaseClass):       #  class SqliteQueueDat
                     krnl_logger.info('Other threads are still alive and writing data to the database.'
                                      ' Please terminate all other database-accessing threads first.')
                     return False
-
-            krnl_logger.info(f'stop(): passing for {self._database} async write object.')
+            krnl_logger.info(f'stop(): shutting down {self._database} async write object.')
             self._write_queue.put(SHUTDOWN)
             self._is_stopped = True
+
         self._writer.join()     # join() fuerza al thread que lanzo el db writer a esperar que se procese SHUTDOWN.
         return True
 
@@ -681,238 +668,224 @@ class GreenletHelper(ThreadHelper):
 # --------------------------------------------- END AsyncCursor --------------------------------------------------- #
 
 
-# ------------------------------------------ Trigger Functions ---------------------------------------------------- #
-
-def _create_db_trigger(trigger_str=None):
-    """ Creates trigger defined by trigger_str in database.
-       @return: None
-       """
-    qryObj = SQLiteQuery()
-    cur = qryObj.execute(trigger_str)
-    if not isinstance(cur, sqlite3.Cursor):
-        db_logger.error(f'ERR_DB: Database trigger {trigger_str} could not be created.')
-    return None
-
-def _drop_db_trigger(trigger_name=None):
-    """ Creates trigger defined by trigger_str in database.
-       @return: None
-       """
-    if trigger_name:
-        qryObj = SQLiteQuery()
-        cur = qryObj.execute(f'DROP IF EXISTS {trigger_name}; ')
-        if not isinstance(cur, sqlite3.Cursor):
-            db_logger.error(f'ERR_DB: Database trigger {trigger_name} could not be dropped.')
-    return None
-
-
-
-
-
-
-def _trigger_check_duplicates_all_ids(tblName: str = None, db=MAIN_DB_NAME):          # for Geo, Caravanas
-    dbTblName = getTblName(tblName)
-    if strError in str(dbTblName):
-        if strError in getTblName(db_table_name=tblName.strip()):
-            return False
-        dbTblName = tblName.strip()
-
-    return True
-
-def _trigger_check_duplicates_single_id(tblName: str = None, db=MAIN_DB_NAME):   # for Animales, Dispositivos, Personas
-    dbTblName = getTblName(tblName)
-    if strError in str(dbTblName):
-        if strError in getTblName(db_table_name=tblName.strip()):
-            return False
-        dbTblName = tblName.strip()
-    return True
-
-
-def _trigger_update_linked_cols(tblName: str = None, db=MAIN_DB_NAME, linked_table=''):
+def setrecords(chunks: pd.DataFrame | Iterable = None, tbl_name: str = None, *, db_name=None) -> Iterable:
     """
-    Updates column UID_Objeto on table linked_table when UID_Objecto is updated on table tblName.
-    @param tblName: table where the UID_Objeto is UPDATEd.
-    @param db:
-    @param linked_table:Table with col linked to tblName.UID_Objeto that must be modified to preserve same UID_Objeto.
-    @return: None.
+    Writes pandas dataframes to db, queuing the data in the SQLiteQueueDatabase queue for asynchronous execution.
+    Splits each dataframe into 2: UPDATE dataframes (rows with fldID = None) and INSERT dataframes (fldID >= 0)
+    Executes the writes for all non-empty dataframes.
+    @param tbl_name: table key name (starts with "tbl").
+    @param chunks: pd.DataFrame object or Iterable.
+    @param db_name: Database name where to perform the write (str). Default: None -> resolves to MAIN_DB_NAME.
+    @return: sqlite.Cursor tuple of sqlit3.cursors for dataframes written, (cur1, cur2, ).
+            Returns empty tuple if nothing is written.
     """
-    dbTblName = getTblName(tblName)
-    if strError in str(dbTblName):
-        if strError in getTblName(db_table_name=tblName.strip()):
-            return False
-        dbTblName = tblName.strip()
-
-
-    return True
-
-
-def _trigger_delete_FK_row(tblName: str = None, db=MAIN_DB_NAME, linked_table=''):
-    """             # TODO: CHECK IF THIS NEEDS TO BE IMPLEMENTED.
-    DELETEs record with column UID_Objeto on table target_table when UID_Objecto is DELETEd from table tblName.
-    @param tblName:
-    @param db:
-     @param linked_table:Table with col linked to tblName.UID_Objeto that must be DELETEd to preserve consistency.
-    @return: None
-    """
-    dbTblName = getTblName(tblName)
-    if strError in str(dbTblName):
-        if strError in getTblName(db_table_name=tblName.strip()):
-            return False
-        dbTblName = tblName.strip()
-
-
-    return True
-
-
-#                                       TODO(cmt): all trigger function below are deprecated.
-def init_db_replication_triggers():
-    """
-    Reads data from _sys_Fields table and sets INSERT and UPDATE Triggers for all rows with 'Methods' != None.
-    @return: None
-    """
-    con = connCreate()
-    sql = "SELECT ID_Table, Table_Name, Table_Key_Name, Trigger_INSERT FROM '_sys_Tables' WHERE Trigger_INSERT IS NOT NULL; "
-    cur = con.execute(sql)
-    tbl_list = cur.fetchall()
-    trigger_tables_dict = {}  # {dbTblName: Methods,} Methods: method to process table replication across nodes.
-    if tbl_list:
-        trigger_tables_dict = {tbl_list[i][1]: tbl_list[i][3] for i in range(len(tbl_list)) if
-                               isinstance(tbl_list[i][3], str)}
-    if trigger_tables_dict:
-        for k in trigger_tables_dict:
-            flds_dict = getFldName(db_table_name=k)     # Gets FULL field structure as dict {fldName: dbFldName, }
-            for f in ('fldUPDATE', 'fldTerminal_ID', 'fldPushUpload', 'fldBitmask', 'fldTimeStampSync'):
-                if f in flds_dict:
-                    flds_dict.pop(f, None)
-            update_fields_list = list(flds_dict.values())
-            update_str = trigger_on_update(k, update_fields_list)       # returns None if table name not found.
-            if update_str:
-                con.execute(update_str)
-            insert_str = trigger_on_insert_delete(k)
-            if insert_str:
-                con.execute(insert_str)
-    con.close()
-    retValue = trigger_tables_dict
-    return retValue
-
-
-def trigger_on_update(tblName: str, col_list=None):     # TODO: "AFTER UPDATE" TRIGGERS ARE NOW DEPRCATED. 16-DEC-23
-    """ Trigger on UPDATE: for fields selected in col_list increments value of field Record UPDATE on every UPDATE.
-    The system depends on every table having unique "Record UPDATE" values, in every terminal, so a random value is
-    generated when Record UPDATE first initializes """
-    dbTblName = getTblName(tblName)
-    if strError in str(dbTblName):
-        if strError in getTblName(db_table_name=tblName.strip()):
-            return None
-        else:
-            dbTblName = tblName
-
-    if col_list and isinstance(col_list, (tuple, list)):
-        col_list_str = 'OF '
-        for idx, col in enumerate(col_list):
-            col_list_str += f'"{col}"' + (', ' if idx != len(col_list)-1 else '')
+    db_name = db_name if db_name in _DataBase.active_databases() else MAIN_DB_NAME
+    write_obj = SqliteQueueDatabase(db_name=db_name)
+    if tbl_name:
+        db_tbl_name = getTblName(db_table_name=tbl_name, db_name=db_name)
     else:
-        col_list_str = ''
-
-    con = connCreate()
-    cur = con.execute("SELECT DB_Table_Name FROM '_sys_Trigger_Tables'; ")
-    tbl_list = [j[0] for j in cur.fetchall() if j] or []     # fetchall() returns [(tbl1,), (tbl2,), (tbl3), ]
-    fldNames = getFldName(db_table_name=dbTblName)      # returns {fldName: dbFldName, }
-    if "Record UPDATE" not in fldNames.values() and dbTblName not in tbl_list:
-        return None
-
-    return f'CREATE TRIGGER IF NOT EXISTS "Trigger_{dbTblName}_UPDATE" AFTER UPDATE {col_list_str}' \
-           f' ON "{dbTblName}" FOR EACH ROW BEGIN ' + \
-           (f' UPDATE "{dbTblName}" SET "Record UPDATE" = IFNULL(old."Record UPDATE",' 
-            f' {randrange(1000, 5000) * randrange(100, 1000)}) + 1 WHERE ROWID=new.ROWID;'
-            if "Record UPDATE" in fldNames.values() else '') + \
-           (f' UPDATE _sys_Trigger_Tables SET TimeStamp=DATETIME("now","localtime"), Last_Updated_By="{TERMINAL_ID}"'
-            f' WHERE DB_Table_Name="{dbTblName}";'
-            if dbTblName in tbl_list else '') + \
-           f' END; '
-
-    # return f'CREATE TRIGGER IF NOT EXISTS "Trigger_{dbTblName}_UPDATE" AFTER UPDATE {col_list_str}' \
-    #        f' ON "{dbTblName}" FOR EACH ROW BEGIN ' + \
-    #        (f' UPDATE "{dbTblName}" SET "Record UPDATE" = IFNULL(old."Record UPDATE",'
-    #         f' {randrange(1000, 5000) * randrange(100, 1000)}) + 1 WHERE ROWID=new.ROWID;'
-    #         if "Record UPDATE" in fldNames.values() else '') + \
-    #        (f' UPDATE _sys_Trigger_Tables SET TimeStamp=DATETIME("now","localtime") WHERE DB_Table_Name="{dbTblName}";' \
-    #             if dbTblName in tbl_list else '') + \
-    #        f' END; '
-
-    # return f'CREATE TRIGGER IF NOT EXISTS "Trigger_{dbTblName}_UPDATE" AFTER UPDATE {col_list_str}' \
-    #        f' ON "{dbTblName}" FOR EACH ROW BEGIN ' + \
-    #        (f' UPDATE "{dbTblName}" SET "Record UPDATE" = IFNULL(old."Record UPDATE",0) + 1 WHERE ROWID=new.ROWID;'
-    #         if "Record UPDATE" in fldNames.values() else '') + \
-    #        f' UPDATE _sys_Trigger_Tables SET TimeStamp=DATETIME("now","localtime") WHERE DB_Table_Name="{dbTblName}";' \
-    #        + f' END; '
-
-
-def trigger_on_insert_delete(tblName: str, operation='insert'):
-    """ Updates field TimeStamp in table _sys_Trigger_Tables after INSERT, UPDATE or DELETE on table tblName
-    @param tblName: valid table name to create INSERT or DELETE Trigger for.
-    @param operation: INSERT, DELETE
-    """
-    if str(operation).lower() not in ('insert', 'delete', 'del'):
-        return 'ERR_INP_Invalid Arguments: Operation not valid (operation must be INSERT or DELETE).'
-    dbTblName = getTblName(tblName)
-    if strError in str(dbTblName):
-        if isinstance(tblName, str):
-            dbTblName = tblName.strip()
+        # uses data in dataframe to pull table name.
+        if isinstance(chunks, pd.DataFrame):
+            tbl_name = chunks.db.tbl_name
+            db_tbl_name = chunks.db.db_tbl_name
         else:
-            return None
+            ittr = itertools.tee(chunks, 2)
+            chunks = ittr[0]
+            temp = next(ittr[1])
+            tbl_name = temp.db.tbl_name
+            db_tbl_name = temp.db.db_tbl_name
 
-    con = connCreate()
-    cur = con.execute("SELECT DB_Table_Name FROM '_sys_Trigger_Tables'; ")
-    tbl_list = [j[0] for j in cur.fetchall() if j] or []     # fetchall() returns [(tbl1,), (tbl2,), (tbl3), ]
-    operation = 'INSERT' if 'ins' in operation else 'DELETE'
-    if operation != "INSERT" and dbTblName not in tbl_list:
-        return None
+    field_names = getFldName(tbl_name, '*', mode=1, db_name=db_name)     # {fldName: dbFldName, }
+    if strError in db_tbl_name or not isinstance(field_names, dict):
+        raise ValueError(f'ERR_ValueError - setrecords(): invalid database table name: {str(tbl_name)}. '
+                         f'Valid table key name required.')
+    hidden_cols = SQLiteQuery().execute(f'SELECT name FROM pragma_table_xinfo("{db_tbl_name}") '
+                                        f'WHERE hidden > 0; ').fetchall()
+    if isinstance(chunks, pd.DataFrame):
+        chunks = (chunks, )
 
-    # 1. UPDATE dbTblName.Terminal_ID = Terminal_ID to indicate which Terminal made the change to the record.
-    # 2. UPDATE _sys_Trigger_Tables.Last_Updated_By != TERMINAL_ID -> Should only run when a duplicate value is found.
-    # TODO(cmt): This Trigger WILL OVERWRITE Terminal_ID in ALL incoming records with the local Terminal_ID. WON'T DO!!
-    val =  f'CREATE TRIGGER IF NOT EXISTS "Trigger_{dbTblName}_{operation}" AFTER {operation} ON "{dbTblName}"' \
-           f' FOR EACH ROW BEGIN' + \
-           (f' UPDATE "{dbTblName}" SET Terminal_ID=(SELECT Terminal_ID FROM _sys_terminal_id LIMIT 1) WHERE ROWID=new.ROWID; '
-            if operation == 'INSERT' else '') + \
-           (f' UPDATE _sys_Trigger_Tables SET TimeStamp=DATETIME("now","localtime"), Last_Updated_By="{TERMINAL_ID}"'
-            f' WHERE DB_Table_Name="{dbTblName}" AND new.Terminal_ID != "{TERMINAL_ID}";'
-             if dbTblName in tbl_list else '') + \
-            f' END; '
+    if isinstance(chunks, Iterable):
+        for chunk in chunks:
+            # # TODO: Some erroneus data fed into dataframe to test UPDATE / INSERT operations. Remove after testing.
+            # chunk.loc[0:4, field_names['fldID']] = (None, None, None, None, None)
+            # chunk.loc[0:4, field_names['fldObjectUID']] = [uuid4().hex for j in range(5)]
 
-    print(f'Trigger INSERT: {val}')
-    return val
+            # 1.  Remove hidden/generated cols to avoid sqlite write errors.
+            for col in chunk.columns:
+                for c in hidden_cols:
+                    if field_names[col] in c:
+                        chunk.drop(columns=col, inplace=True)    # removes the hidden/generated col from df.
 
-# --------------------------------------------- End Trigger functions --------------------------------------------- #
+            # 2. Convert all NaN values to None, to pass to sqlite3.
+            chunk.fillna(np.nan).replace([np.nan], [None], inplace=True)
+
+            # 3. sqlite3 does not support numpy.int64. conversion is done via a converter in config.py
+
+            # 4. Remove rows with invalid fldID values (fldID values not int and not None).
+            # TODO: Avoid this check. It may be expensive in terms of execution time. Use constraint in db file.
+            # chunk = chunk[chunk[field_names['fldID']].apply(lambda x: (isinstance(x, int) or x is None))]
+
+            # 5. Convert all pd.TimeStamp columns to str (sqlite3 converter cannot handle pd.TimeStamp).
+            for col in chunk.columns:  # Converts all pd.TimeStamp objects to string.
+                if 'datetime' in chunk.dtypes[col].__class__.__name__.lower():
+                    chunk[col] = pd.Series(chunk[col].dt.to_pydatetime(), dtype=object)    # uses TimeStamp Series dt Accessor.
+
+            cols = tuple([field_names[k] for k in chunk.columns])  # Must retain column names order.
+            # Checks if fldID col exists and if so -> all rows with fldID != None are set for UPDATE operations, while
+            # rows with fldID = None are selected for INSERT operations.
+            # Splits each chunk dataframe into 2: insert and update, and runs executemany for all dataframes created.
+            if 'fldID' in chunk.columns:
+                # Creates INSERT and UPDATE dataframes based in fldID value for each row.
+                df_update = chunk[chunk['fldID'] >= 0]     # None, nulls evals to False. >=0 eval to True
+                df_insert = chunk[~(chunk['fldID'] >= 0)]  # Negate to obtain the NULLs rows for INSERT.
+
+                # FYI only: dataframe resulting from the difference between 2 dataframes (ALL dataframe data compared).
+                # df_insert = chunk[~chunk.apply(tuple, 1).isin(df_update.apply(tuple, 1))]
+
+                # FYI only: dataframe resulting from the difference between 2 dataframes, based on column differences.
+                # df_insert = chunk[~chunk[chunk.field_names['fldID']].isin(df_update[chunk.field_names['fldID']])]
+            else:
+                # fldID column not passed in DataFrame -> it's all INSERT rows.
+                df_insert = chunk
+                df_update = chunk.iloc[0:0]         # No UPDATE rows: Creates empty update dataframe.
+
+            # cols = tuple([field_names[k] for k in chunk.columns])       # Must retain column names order!!
+            wrt_dict = {}
+            if not df_insert.empty:                                 # Do INSERTs first
+                qMarks = ' (' + (len(df_insert.columns) * ' ?,')[:-1] + ') '
+                sql_insert = f'INSERT INTO "{db_tbl_name}" ' + str(cols) + ' VALUES' + qMarks + '; '
+                if len(df_insert) > PANDAS_WRT_CHUNK_SIZE:
+                    df_insert = np.array_split(df_insert, len(df_insert) // PANDAS_WRT_CHUNK_SIZE)
+                else:
+                    df_insert = (df_insert, )
+                wrt_dict[sql_insert] = df_insert             # write dictionary to send data to writer thread.
+                # print(f'sql INSERT: {sql_insert}')
+
+            if not df_update.empty:                                 # UPDATES go second.
+                sql_update = f'UPDATE "{db_tbl_name}" SET '
+                for i in cols:
+                    sql_update += f'"{i}"=?, '
+                sql_update = sql_update[:-2] + f' WHERE "{field_names["fldID"]}"=? ; '
+                # Inserts a duplicate fldID column at the end of the dataframe for the "WHERE fldID = ? "...
+                df_update.insert(len(df_update.columns), 'Duplicate_fldID', df_update.loc[:, 'fldID'])
+                if len(df_update) > PANDAS_WRT_CHUNK_SIZE:
+                    df_update = np.array_split(df_update, len(df_update) // PANDAS_WRT_CHUNK_SIZE)  # func returns list.
+                else:
+                    df_update = (df_update, )
+                wrt_dict[sql_update] = df_update             # write dictionary to send data to writer thread.
+
+            cur_list = []
+            for sql, dataframes in wrt_dict.items():        # writes only non-empty dataframes.
+                for frame in dataframes:
+                    params = frame.values.tolist()
+                    # Puts 1 write cursor object in write-queue for dataframe created, and 1 return cur in cur_list.
+                    cur = write_obj.executemany_sql(sql, params, tbl_name=tbl_name)
+                    cur_list.append(cur)
+
+            # Returns sqlite3 list of cursors based on # of df written. Check cur.rowcount to validate writes.
+            # return cur_list[0] if len(cur_list) == 1 else tuple(cur_list)
+            return tuple(cur_list)
+    else:
+        raise TypeError(f'ERR_TypeError: df_setrecords(). Invalid type for {chunks}. Must be iterable or DataFrame.')
 
 
-def setFldCompareIndex(val: int = None, *, field_list=()):      # Must define function here to be able to use writeObj.
-    """
-    Sets val (int) as the Compare_Index value in _sys_Fields table for the items listed in field_list.
-    @param val:
-    @param field_list: (str). Fields list of the form "tblName.fldName".
-    @return: True if success (with at least 1 table.field item) or False if nothing is written to _sys_Fields tab.e
-    """
-    if not isinstance(val, int) or not field_list or not hasattr(field_list, "__iter__"):
-        return False
-    update_flag = False
-    for j in field_list:
-        tbl_fld = j.split(".")
-        tbl, fld = (tbl_fld[0], tbl_fld[1]) if len(tbl_fld) >= 2 else (None, None)
-        if tbl and fld:
-            # Validates tbl and fld.
-            dbFldName = getFldName(tbl, fld)
-            dbTblName = getTblName(tbl)
-            if strError in dbTblName or strError in dbFldName:
-                continue
-            sql = f'UPDATE "_sys_Fields" SET "Compare_Index"={val} WHERE Table_Key_Name={tbl} AND Field_Key_Name={fld}'
-            cur = writeObj.execute_sql(sql)       # Send data to be written to db using the sequential write spooler.
-            if not update_flag and cur.rowcount > 0:
-                update_flag = True
-    if update_flag:
-        set_reloadFields()                           # Flags system for Fields dictionary to be re-loaded to memory.
-        return True
-    return False
+
+# def df_setrecords00(chunks: pd.DataFrame | Iterable) -> Iterable:
+#     """
+#     Writes pandas dataframes to db, queuing the data in the SQLiteQueueDatabase queue for asynchronous execution.
+#     Splits each dataframe into 2: UPDATE dataframes (rows with fldID = None) and INSERT dataframes (fldID >= 0)
+#     Executes the writes for all non-empty dataframes.
+#     @param chunks: pd.DataFrame object or Iterable.
+#     @return: (cur1, cur2) -> Tuple with sqlit3.cursor(s)   #  chunk.loc[0:1, chunk.field_names['fldID']] = None, None
+#             Returns empty tuple if nothing is written.
+#     """
+#     if isinstance(chunks, pd.DataFrame):
+#         chunks = (chunks, )
+#
+#     if isinstance(chunks, Iterable):
+#         for chunk in chunks:
+#             # Checks if fldID col exists and if so, if it is populated: all rows with fldID != None are for UPDATES. All
+#             # fldID = None are for INSERT operations.
+#             # Splits each chunk dataframe into 2: insert and update, and runs executemany for all dataframes created.
+#             if hasattr(chunk, 'field_names'):
+#                 # Writes only dataframes that have a db table structure.
+#                 chunk.loc[0:4, chunk.field_names['fldID']] = [None] * 5  # TODO: Some INSERTs. Remove after testing.
+#                 chunk.loc[0:4, chunk.field_names['fldObjectUID']] = [uuid4().hex for j in range(5)]
+#
+#                 db_tbl_name = getTblName(chunk.tbl_name)
+#                 if strError in db_tbl_name:
+#                     raise ValueError(f'ERR_Invalid Argument setrecords(): Invalid db table name {chunk.tbl_name}.')
+#                 wrtbl_cols = getFldName(chunk.tbl_name, '*', mode=1,  exclude_hidden_generated=True)
+#                 if strError in wrtbl_cols:
+#                     raise ValueError(f'ERR_DBAccess setrecords(): cannot read _sys_Fields table.')
+#                 # Cleans dataframe of any sqlite generated / hidden columns (removes the hidden/generated cols).
+#                 for col in chunk.columns:
+#                     if col not in wrtbl_cols.values():
+#                         chunk.drop(columns=col, inplace=True)
+#
+#                 if 'fldID' in chunk.field_names:
+#                     # Creates INSERT and UPDATE dataframes based in fldID value for each row.
+#                     df_update = chunk[chunk[chunk.field_names['fldID']] >= 0]  # None evals to False. non-ints->throw error
+#                     df_insert = chunk[~(chunk[chunk.field_names['fldID']] >= 0)]
+#
+#                     # FYI only: df resulting from the difference between 2 dataframes (ALL dataframe data compared).
+#                     # df_insert = chunk[~chunk.apply(tuple, 1).isin(df_update.apply(tuple, 1))]
+#
+#                     # FYI only: df difference between 2 dataframes, base on column differences.
+#                     # df_insert = chunk[~chunk[chunk.field_names['fldID']].isin(df_update[chunk.field_names['fldID']])]
+#
+#                     # print(f'df_insert:\n {df_insert}')
+#                     # print(f'df_update:\n {df_update}')
+#                 else:
+#                     # fldID column not passed in DataFrame -> it's all INSERT rows.
+#                     df_insert = chunk
+#                     df_update = chunk.iloc[0:0]         # Creates empty update dataframe, for testing condition below.
+#
+#                 wrt_dict = {}
+#                 if not df_update.empty:
+#                     sql_update = f'UPDATE "{db_tbl_name}" SET '
+#                     for i in df_update.columns:
+#                         sql_update += f'"{i}"=?, '
+#                     sql_update = sql_update[:-2] + f' WHERE "{chunk.field_names["fldID"]}"=? ; '
+#                     # Inserts a duplicate fldID column at the end of the dataframe for the "WHERE fldID = ? "...
+#                     df_update.insert(len(df_update.columns), 'Duplicate_fldID',
+#                                      df_update.loc[:, chunk.field_names['fldID']])
+#                     # df_update['Duplicate_fldID'] = df_update.loc[:, chunk.field_names['fldID']]
+#                     # print(f'sql UPDATE: {sql_update}')
+#                     wrt_dict[sql_update] = df_update             # write dictionary to send data to writer thread.
+#
+#                 if not df_insert.empty:
+#                     qMarks = ' (' + (len(df_insert.columns) * ' ?,')[:-1] + ') '
+#                     sql_insert = f'INSERT INTO "{db_tbl_name}" ' + str(tuple(df_insert.columns)) + \
+#                                  ' VALUES' + qMarks + '; '
+#                     wrt_dict[sql_insert] = df_insert             # write dictionary to send data to writer thread.
+#                     # print(f'sql INSERT: {sql_insert}')
+#
+#                 cur_list = []
+#                 for sql, df in wrt_dict.items():        # writes only non-empty dataframes.
+#                     for col in df.columns:
+#                         if any(dt in df.dtypes[col].__class__.__name__ for dt in ('date', 'time', 'datetime')):
+#                             df[col] = df[col].dt.strftime(fDateTime)    # Converts all pd.TimeStamp objects to string.
+#                     params = df.values.tolist()
+#                     # Puts 1 write cursor object in write-queue for dataframe created, and 1 return cur in cur_list.
+#                     cur = writeObj.executemany_sql(sql, params)
+#                     cur_list.append(cur)
+#
+#                 # Returns list of cursors based on df splits performed. Must check cur.rowcount to test write success.
+#                 return tuple(cur_list)
+#             raise ValueError(f'ERR_Value: setrecords(). Malformed DataFrame. Cannot be written to database.')
+#         raise TypeError(f'ERR_Type: setrecords(). Invalid type for {chunks}. Must be iterable or DataFrame.')
+
+
+# Write object para TODAS las escrituras en DB del sistema (1 and only 1 writeObj per open database).
+writeObj = SqliteQueueDatabase(db_name=MAIN_DB_NAME, autostart=True, sync_db_across_devices=False)
+# Todas las llamadas posteriores a SqliteQueueDatabase() para crear un objeto para la base de datos MAIN_DB_NAME
+# retornara este mismo objeto (singleton para cada db abierta). Si hubiese mas de un obj writeObj creados por distintos
+# threads para una misma db, aparecen errores "database locked" (comprobado!)
+# Se pueden crear eventualmente multiples writeObjects para multiples DB (1 writeObject por cada DB abierta).
+# writeObj_ds = SqliteQueueDatabase(DATASTREAM_DB_NAME, autostart=True, sync_db_across_devices=False)
+# writeObj_nr = SqliteQueueDatabase(NR_DB_NAME, autostart=True, sync_db_across_devices=False)
+
 
 
 def init_database():
@@ -924,80 +897,35 @@ def init_database():
         globals()['DB_INITIALIZED'] = True
     return None
 
+def setFldCompareIndex(val: int = None, *, db_obj=None, field_list=()):
+    """
+    Sets val (int) as the Compare_Index value in _sys_Fields table for the items listed in field_list.
+    @param db_obj: Database object to update Compare Indices table on.
+    @param val:
+    @param field_list: (str). Fields list of the form "tblName.fldName".
+    @return: True if success (with at least 1 table.field item) or False if nothing is written to _sys_Fields table
+    """
+    db_obj = db_obj if isinstance(db_obj, _DataBase) else db_main
+    if not isinstance(val, int) or not field_list or not hasattr(field_list, "__iter__"):
+        return False
+    update_flag = False
+    dbName = db_obj.dbName or MAIN_DB_NAME
+    for j in field_list:
+        tbl_fld = j.split(".")
+        tbl, fld = (tbl_fld[0], tbl_fld[1]) if len(tbl_fld) >= 2 else (None, None)
+        if tbl and fld:
+            # Validates tbl and fld.
+            dbFldName = getFldName(tbl, fld, db_obj=db_obj)
+            dbTblName = getTblName(tbl, db_obj=db_obj)
+            if strError in dbTblName or strError in dbFldName:
+                continue
+            sql = f'UPDATE "_sys_Fields" SET "Compare_Index"={val} WHERE Table_Key_Name={tbl} AND Field_Key_Name={fld}'
+            cur = writeObj.execute_sql(sql, tbl_name='_sys_Fields')  # Send data to be written to db using the sequential write spooler.
+            if not update_flag and cur.rowcount > 0:
+                update_flag = True
+    if update_flag:
+        db_obj.set_reloadFields()  # Flags system for Fields dictionary to be re-loaded into memory.
+        return True
+    return False
 
-# Write Obj. para TODAS las escrituras en DB del sistema
-writeObj = SqliteQueueDatabase(MAIN_DB_NAME, autostart=True, sync_db_across_devices=False)
-# Todas las llamadas posteriores a SqliteQueueDatabase() para crear un objeto, retornara este mismo objeto (singleton)
-# OJO: si hubiese mas de un obj writeObj creados por distintos threads, aparecen errores "database locked" (comprobado!)
-# Se pueden crear eventualmente multiples writeObjects para multiples archivos DB (1 writeObject por cada archivo DB).
 
-writeObj_DS = SqliteQueueDatabase(DATASTREAM_DB_NAME, autostart=True, sync_db_across_devices=False)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# Source code for reference only: SqliteExtDatabase just does a bunch of initializations and passes args, kwars up,
-# apparently to create the db _conn ->
-
-# class SqliteExtDatabase(SqliteDatabase):
-#     def __init__(self, database, c_extensions=None, rank_functions=True,
-#                  hash_functions=False, regexp_function=False,
-#                  bloomfilter=False, json_contains=False, *args, **kwargs):
-#         super(SqliteExtDatabase, self).__init__(database, *args, **kwargs)
-#         self._row_factory = None
-#
-#         if c_extensions and not CYTHON_SQLITE_EXTENSIONS:
-#             raise ImproperlyConfigured('SqliteExtDatabase initialized with '
-#                                        'C extensions, but shared library was '
-#                                        'not found!')
-#         prefer_c = CYTHON_SQLITE_EXTENSIONS and (c_extensions is not False)
-#         if rank_functions:
-#             if prefer_c:
-#                 register_rank_functions(self)
-#             else:
-#                 self.register_function(bm25, 'fts_bm25')
-#                 self.register_function(rank, 'fts_rank')
-#                 self.register_function(bm25, 'fts_bm25f')  # Fall back to bm25.
-#                 self.register_function(bm25, 'fts_lucene')
-#         if hash_functions:
-#             if not prefer_c:
-#                 raise ValueError('C extension required to register hash '
-#                                  'functions.')
-#             register_hash_functions(self)
-#         if regexp_function:
-#             self.register_function(_sqlite_regexp, 'regexp', 2)
-#         if bloomfilter:
-#             if not prefer_c:
-#                 raise ValueError('C extension required to use bloomfilter.')
-#             register_bloomfilter(self)
-#         if json_contains:
-#             self.register_function(_json_contains, 'json_contains')
-#
-#         self._c_extensions = prefer_c
-#
-#     def _add_conn_hooks(self, conn):
-#         super(SqliteExtDatabase, self)._add_conn_hooks(conn)
-#         if self._row_factory:
-#             conn.row_factory = self._row_factory
-#
-#     def row_factory(self, fn):
-#         self._row_factory = fn

@@ -1,12 +1,13 @@
 import os
 import logging
 from logging import Logger
-import typing
-from money import Money
+from threading import Event
+import numpy as np
+# from money import Money
 from logging.handlers import RotatingFileHandler
 import functools
 import builtins
-from uuid import UUID, uuid4, uuid1
+from uuid import uuid4, uuid1
 from datetime import datetime, timedelta
 from time import time, monotonic, perf_counter, perf_counter_ns
 import re
@@ -14,52 +15,48 @@ import inspect
 from inspect import currentframe
 from sys import _getframe, modules, setswitchinterval, getswitchinterval, argv
 import ntplib
-import json
-from uuid import UUID
-from json import JSONEncoder, JSONDecodeError
+import pandas as pd
+
+try:
+    import orjson as json                       # orjson is a super-fast json encoder/decoder.
+except (ModuleNotFoundError, ImportError):
+    try:
+        import ujson as json                    # ujson is a fast json encoder/decoder if orjson not found.
+    except (ModuleNotFoundError, ImportError):
+        import json                   # Fall back to standard json module if modules above not found.
 from krnl_exceptions import DBAccessError
 import sqlite3
 from decimal import Decimal
-from deepdiff import DeepDiff
-# PRINT_MAX_LEN = 160
-# VERBOSE = 0             # Parametro para habilitar/deshabilitar avisos a pantalla de ciertas funciones
 
+# PRINT_MAX_LEN = 160
 fDateTime = "%Y-%m-%d %H:%M:%S.%f"   # Este formato se usa en todos los casos, fDate, fTime no -> son obsoletos.
 strError = 'ERR_'
 
-THREAD_SWITCH_INTERVAL = getswitchinterval()   # 5 msec work way much better than 10 msec. Leave this alone..
+SYSTEM_SWITCH_INTERVAL = getswitchinterval()   # 5 msec work way much better than 10 msec. Leave this alone..
+THREAD_SWITCH_INTERVAL = SYSTEM_SWITCH_INTERVAL
 # TODO(cmt): thread switch_interval (default=0.005) is used by BufferWriter class to prioritize thread execution.
 setswitchinterval(THREAD_SWITCH_INTERVAL)
 
 MAIN_DB_NAME = "GanadoSQLite.db"
-DATASTREAM_DB_NAME = "GanadoSQLite_DS.db"
+NR_DB_NAME = "GanadoSQLite_nr.db"           # Non replicable database (for system use: status, loadable modules, etc).
+DATASTREAM_DB_NAME = "GanadoSQLite_ds.db"   # Data Stream database. Should be non-replicable as well.
+PANDAS_READ_CHUNK_SIZE = 1000               # Value for chunksize argument in pandas db read functions.
+PANDAS_WRT_CHUNK_SIZE = PANDAS_READ_CHUNK_SIZE
 
 TERMINAL_ID = None                 # Initialized by register_terminal() function.
 TERMINAL_NAME = "Main Testing System"
 
-MAX_GOBACK_DAYS = 721              # Days to go back in time to pull records from specific tables.
+MAX_GOBACK_DAYS = 721                   # Days to go back in time to pull records from specific tables.
 SQLite_MAX_ROWS = 9223372036854775807   # Value from sqlite documentation Theoretical software limit: 2**64
 CLIENT_MIN_INDEX = 0              # Seteado por el Server al registrar y habilitar el Client. Estos valores vienen de DB
 CLIENT_MAX_INDEX = 268435456      # 2^28: Max Index available to this client to create new records. Set by the Server.
 NEXT_BATCH_MIN_INDEX = 268435456 + 1   # Guarda datos de 1 batch adicional por continuidad. Estos valores vienen de DB
 NEXT_BATCH_MAX_INDEX = NEXT_BATCH_MIN_INDEX + 268435456         # Estos valores vienen de DB
 
-# DB_SYNC = False          # Flags DB synchronization across devices.
-BIT_UPLOAD = 1          # Record Bitmask definitions
-BIT_SYNC = 2
-
-tables_and_binding_objects = {'Animales': 'Animal', 'Caravanas': 'Tag', 'Personas': 'Person', 'Geo Entidades': 'Geo',
-                              'Dispositivos': 'Device', 'Animales Registro De Actividades': 'Animal',
-                              'Animales Registro De Actividades Programadas': 'Animal',
-                              'Caravanas Registro De Actividades': 'Tag',
-                              'Dispositivos Registro De Actividades': 'Device',
-                              'Dispositivos Registro De Actividades Programadas': 'Device',
-                              'Personas Registro De Actividades': 'Person',
-                              'Personas Registro De Actividades Programadas': 'Person'}
-
-ERROR = object()
+# ERROR = object()
+# NULL = object()
 VOID = object()
-NULL = object()
+OBJECT = object()
 
 class ShutdownException(Exception):
     __message = 'ShutdownException Message!'
@@ -263,7 +260,7 @@ fe_logger = getLogger(loggername=FRONT_END_LOGGER, targets_levels={'file': loggi
                       logfile=None, debug=DEBUG_MODE)
 fe_logger.info('Starting up fe_logger...')
 
-# Logger for DB modules specific to DB reads/write (krnl_sqlite.py, krnl_db_access.py). Part of the kernel, but stil...
+# Logger for DB modules specific to DB reads/write (krnl_db_query.py, krnl_db_access.py). Part of the kernel, but still.
 db_logger = getLogger(loggername=DB_LOGGER, targets_levels={'file': logging.INFO, 'console': logging.WARNING},
                       logfile=None, error_file=True, debug=DEBUG_MODE)
 db_logger.info('Starting up db_logger...')
@@ -327,16 +324,33 @@ def removeAccents(input_str: str, *, str_to_lower=True):
     return input_str
 
 
-# ------------------  DB ACCESS functions for this module. Not used anymore, but leave just in case ------------------ #
+# Bit set/clear functions. Used for bitmasks.
+def set_bit(mask, bit):
+    """
+    @param mask: INTEGER value to test/modify
+    @param bit: int -> bit "order", that is, the position of the bit in the mask. It's the number of times to shift
+    '1' starting from the right.
+    @return: int. Result of the shift operation.
+    """
+    return mask | (1 << bit)
+
+def clear_bit(mask, bit):
+    return mask & ~(1 << bit)
+
+def test_bit(mask, bit):
+    return bool(mask & (1 << bit)) * 1
+
+# ------------------  DB ACCESS functions. Low level. ------------------ #
 
 def connCreate(dbName='', *, check_same_thread=True, detect_types=0, isolation_level=None, timeout=0.0, cach_stmt=0,
                uri=False):  # kwargs a todas por ahora, para flexibilidad
-    """Creates a DB connection """
+    """Creates a DB connection in 'rw' mode (Fails if database file is not found). """
     dbName = dbName.strip() if dbName else MAIN_DB_NAME
     try:
-        retValue = sqlite3.connect(dbName, check_same_thread=check_same_thread, detect_types=detect_types,
-                            isolation_level=isolation_level, timeout=timeout, cached_statements=cach_stmt, uri=uri)
-    except(sqlite3.Error, sqlite3.DatabaseError) as e:
+        retValue = sqlite3.connect(f'file:{dbName}?mode=rw', check_same_thread=check_same_thread, timeout=timeout,
+                                   detect_types=detect_types, isolation_level=isolation_level,
+                                   cached_statements=cach_stmt, uri=True)
+    except(sqlite3.Error, sqlite3.DatabaseError, sqlite3.OperationalError) as e:
         retValue = f'ERR_DB_Cannot create connection: {e} - {callerFunction(getCallers=True)}'
         raise DBAccessError(f'{retValue}')
     finally:
@@ -370,7 +384,7 @@ def exec_sql(*, db_name: str = None, sql: str = None, params=''):
         cur = conn.execute(sql, params)   # TODO(cmt): Acceso a DB. Convierte strings a datetime via PARSE_DECLTYPES
     except (sqlite3.Error, sqlite3.DatabaseError, sqlite3.OperationalError) as e:
         krnl_logger.error(f'ERR_DBAccess exec_sql()- sql={sql}. Error: {e}')
-        raise sqlite3.DatabaseError(f'ERR_DBAccess exec_sql()- sql={sql}. Error:{e}')
+        raise sqlite3.DatabaseError(f'ERR_DBAccess exec_sql() - sql={sql}. Error:{e}')
 
     if isinstance(cur, sqlite3.Cursor):
         # IMPORTANTE: acceder via cur.description asegura que los indices de fldNames y valores se correspondan.
@@ -379,20 +393,24 @@ def exec_sql(*, db_name: str = None, sql: str = None, params=''):
         except (TypeError, ValueError, IndexError):
             dbFieldNames = []
         rows = cur.fetchall()               # TODO(cmt): lectura de registros. rows is [(),] (list of tuples)
-        conn.close()
     else:       # Error: Retorna tabla vacia, keyFieldNames=dbFieldNames=[]
         krnl_logger.error(f'ERR_DBAccess dbRead0(): {cur} - {callerFunction()}')
-        raise sqlite3.DatabaseError(f'ERR_DBAccess dbRead0(): {cur} - {callerFunction()}')
+        conn.rollback()
+        conn.close()
+        raise sqlite3.DatabaseError(f'ERR_DBAccess exec_sql(): {cur}.')
+
+    conn.close()
     return dbFieldNames, rows
 
 # -------------------------------------------- End DB Access functions -------------------------------------------- #
 
 # ------------------------------------------ DB Initialization Activities ----------------------------------------- #
 def register_terminal(*, db_name=None, terminal_name=None):
-    """ Reads the Terminal UID value from table _sys_terminal_id. Returns the value. If table _sys_terminal_id doesn't
-    exist creates it and assigns a UID to the database that will be the database id for as long as it exists.
+    """ Reads the Terminal UID value from table _sys_terminal_id. Returns the value.
+    If table _sys_terminal_id doesn't exist creates it and assigns a UID to the database that will be the database id
+    for as long as it exists.
     @return: Terminal UID (str). """
-    db_name = db_name if db_name and isinstance(db_name, str) else MAIN_DB_NAME
+    db_name = db_name or MAIN_DB_NAME
     exec_sql(db_name=db_name, sql="CREATE TABLE IF NOT EXISTS _sys_terminal_id (ID_ROW INTEGER PRIMARY KEY, "
                                   "Terminal_ID TEXT NOT NULL, Terminal_Name TEXT); ")
     fNames, rows = exec_sql(db_name=db_name, sql="SELECT ROWID, Terminal_ID FROM _sys_terminal_id LIMIT 1")
@@ -422,28 +440,8 @@ def register_terminal(*, db_name=None, terminal_name=None):
     exec_sql(db_name=db_name, sql=trigger_sql)
     return terminal_uid
 
-def create_replication_dicts():         # TODO: THIS TO BE DEPRECATED.
-    fldNames, rows = exec_sql(sql="SELECT DB_Table_Name, Object_Name, TimeStamp FROM _sys_Trigger_Tables; ")
-    if rows:
-        tbls_binding_objects = {r[0]: r[1] for r in rows}  # {DB_Table_Name: Class_Name, } Used to for db replication.
-        tbls_last_time_stamps = {r[0]: r[2] for r in rows}  # {DB_Table_Name: last_updated_by, }
-    else:
-        tbls_binding_objects = {}   # binding_objects are the objects that execute the Method below. Usually a class.
-        tbls_last_time_stamps = {}
-                                # if None, Method executes by itself, without any kind of binding object.
-    fldNames, rows = exec_sql(sql="SELECT Table_Name, Methods FROM _sys_Tables WHERE Methods IS NOT NULL; ")
-    if rows:
-        tbls_methods = {r[0]: r[1] for r in rows}  # {DB_Table_Name: Methods, }. Used to manage db replication.
-    else:
-        tbls_methods = {}
-    return tbls_binding_objects, tbls_methods, tbls_last_time_stamps
-
-# tables_and_binding_objects, tables_and_methods, db_time_stamps = create_replication_dicts()
-
-# # classes_with_replication = {trigger_object: cls }
-# classes_with_replication = {}       # Used for REPLICATION functions only.
-# classes_with_duplication = {}       # Same structure as above. Used for Duplication functions only.
 TERMINAL_ID = register_terminal(db_name=MAIN_DB_NAME, terminal_name=TERMINAL_NAME)
+
 
 # ======================================= Critical Time settings for system operation =================================
 
@@ -465,17 +463,17 @@ def getReferenceTime(*, server=None, db_table='_sys_Time_Reference', offset=0.0)
     sys_monoStart = monotonic()
     try:
         # Linea response= genera error si no hay internet link (socket.gaierror: [Errno 11001] getaddrinfo failed)
-        response = client.request(server, version=4)
+        # response = client.request(server, version=4)
         startTime = perf_counter()
         monoStart = monotonic()
         _ = perf_counter()
         execTime = _ - startTime
-        ref_seconds = response.tx_time  # response.tx_time in theory equal to time() output if computer clock is ok
+        ref_seconds = 0  # response.tx_time  # response.tx_time in theory equal to time() output if computer clock is ok
         mono_base_seconds = monoStart + execTime * ADJUST_FACTOR - execution_perf_counter
-        msg = f'response.tx_time: {response.tx_time}, {datetime.fromtimestamp(response.tx_time)}; ' \
-              f'time():{sys_ref_seconds} / utc_time: {datetime.utcfromtimestamp(response.tx_time)} / execTime={execTime}'
-        print(msg)  # dismiss_print=DISMISS_PRINT NO va aqui..
-        krnl_logger.info(msg)
+        # msg = f'response.tx_time: {response.tx_time}, {datetime.fromtimestamp(response.tx_time)}; ' \
+        #       f'time():{sys_ref_seconds} / utc_time: {datetime.utcfromtimestamp(response.tx_time)} / execTime={execTime}'
+        # print(msg)  # dismiss_print=DISMISS_PRINT NO va aqui..
+        # krnl_logger.info(msg)
     except Exception as e:
         error_msg = f'Error {e} while retrieving time from server {server}. Returning secs from time() instead.'
         print(error_msg)
@@ -514,43 +512,63 @@ def time_mt(mode=None):
         return monotonic() - MONO_BASE_SECONDS + SYS_START_SEC
     return datetime.fromtimestamp(monotonic() - MONO_BASE_SECONDS + SYS_START_SEC)
 
-a = time_mt()
 c = time()
-print(f'&&&&------------------------ time_mt(SERVER): {a}  / time(): {a}')
+a = time_mt()
+print(f'&&&&------------------------ time_mt(SERVER): {a}  / time(): {c}')
 print(f'&&&&------------------------ Difference time_mt(SERVER) - time():{c - a} secs.')
 
 # =================================================================================================================== #
 
 #                                       sqlite3 types Adapters and Converters
-
 sqlite3.register_adapter(Decimal, lambda d: str(d))  # Decimal to str to avoid rounding errors caused by float casting.
 sqlite3.register_converter("DECTEXT", lambda d: Decimal(d.decode('ascii')))  # DECTEXT exclusivo de columnas con Montos
-# Note: TIMESTAMP name has converter/adapter pair already embedded in sqlite3. All columns with name TIMESTAMP are
-# processed transparently and automatically between datetime object and str.
+# Note: TIMESTAMP name has converter/adapter pair already embedded in sqlite3 module. All columns with name TIMESTAMP
+# are processed transparently and automatically between datetime object and str.
 
 # Convierte data de tipo JSON a su iterator original (list,dict,etc) para todas las columnas de nombre 'JSON' en DB.
 # Para que esto ande, al abrir una conexion hacer detect_types=PARSE_DECLTYPES. Es la opcion por default en __init__()
-def convert_json(json_data):
-    try:
-        return json.loads(json_data.decode(), object_hook=json_converter)
-    except JSONDecodeError:
-        raise JSONDecodeError('JSON conversion error. Could not convert %s' % json_data)
+if 'orjson' in json.__name__.lower():
+    def convert_json(json_data):
+        try:
+            return json.loads(json_data)            # No decoding needed here... Is it any faster??
+        except json.JSONDecodeError:
+            raise json.JSONDecodeError  # (f'JSON conversion error. Could not convert %s' % json_data)
+else:
+    def convert_json(json_data):
+        try:
+            return json.loads(json_data.decode(), object_hook=json_converter)
+        except json.JSONDecodeError:
+            raise json.JSONDecodeError('JSON conversion error. Could not convert %s' % json_data)
 
 sqlite3.register_converter('JSON', convert_json)
 
-def json_converter(x):     # Ya que json pasa los int keys a str, hay que reconvertir a int al cargarlos desde DB
+def json_converter(x):     # json module convierte los int keys a str. NO reconvertir a int al cargarlos desde DB!
     # TODO(cmt): Convierte en int los dict keys convertibles a int. TENER EN CUENTA y NO USAR '24','151',etc. (esto es
-    #  numeros en formato str como keys en los json dicts. Con esta restriccion, anda lindo esto, che....
+    #  numeros en formato str como keys en los json dicts. Con esta restriccion, anda lindo esto che....
     #  Tambien convierte UUID validos a str.
-    if isinstance(x, dict):
-        aux_dict = {}
-        for k in x:
-            try:
-                aux_dict[int(k)] = x.get(k)
-            except ValueError:
-                aux_dict[k] = x.get(k)
-        return aux_dict
-    return x
+    return x     # 10-May-24: Vamos a probar asi, sin reconvertir str a int (Todos los dicts tienen keys tipo str).
+
+    # if isinstance(x, dict):
+    #     aux_dict = {}
+    #     for k in x:
+    #         try:
+    #             aux_dict[int(k)] = x.get(k)
+    #         except ValueError:
+    #             aux_dict[k] = x.get(k)
+    #     return aux_dict
+    # return x
+
+            # ---------------- Pandas and Numpy required adapters/converters ------------------- #
+
+def adapt_nan(val):
+    return None if pd.isnull(val) else val
+
+sqlite3.register_adapter(np.int64, lambda val: int(val))        # Converts np.int64 to int, to be written to db.
+sqlite3.register_adapter(float, adapt_nan)              # Converts np.nan to None. All other floats, pass along.
+sqlite3.register_adapter(pd._libs.missing.NAType, adapt_nan)   # Converts pd.NA to None.
+sqlite3.register_adapter(np.float64, lambda val: float(val))    # Converts np.float64 to float, to be written to db.
+sqlite3.register_adapter(np.float32, lambda val: float(val))    # Converts np.float32 to float, to be written to db.
+
 
 # ================================================================================================================= #
 
@@ -593,15 +611,15 @@ def compare(val1, val2):
 
 def compare_range(comp_val, ref_val, low_val=VOID, high_val=VOID, *, exclusive=False):
     """
-    Compares comp_val to a value with lower and upper limits (Deviation) passed in data_list.
-    Rules (assumes comp_val is always passed):
+    Compares _comp_val to a value with lower and upper limits (Deviation) passed in data_list.
+    Rules (assumes _comp_val is always passed):
     1) No values passed -> returns False
     2) ref_val != None. All rest is None (1 value passed) -> compares as ==
     3) ref_val OR low_val != None -> ABSOLUTE COMPARISON (NO reference value).
-        3.1) (None, low_val) -> comp_val <= low_val
-        3.2) (ref_val, None) -> comp_val >= ref_val
+        3.1) (None, low_val) -> _comp_val <= low_val
+        3.2) (ref_val, None) -> _comp_val >= ref_val
     4) ref_val, low_val, high_val != None -> RELATIVE COMPARISON (using reference value).
-        ref_val -low_val <= comp_val <= ref_val+high_val
+        ref_val -low_val <= _comp_val <= ref_val+high_val
     @param exclusive: True: use <, >.   False: use <=, >=.
     @return:
     """
@@ -610,11 +628,11 @@ def compare_range(comp_val, ref_val, low_val=VOID, high_val=VOID, *, exclusive=F
     if low_val is VOID and high_val is VOID:            # 1 value passed. Compares as ==.
         return comp_val == ref_val if type(comp_val) == type(ref_val) else False
     elif high_val is VOID:                              # 2 valueS passed. Compares as <= or >=.
-        if ref_val is None:             # (comp_val, None, low_val) => chequea comp_val <= low_val
+        if ref_val is None:             # (_comp_val, None, low_val) => chequea _comp_val <= low_val
             if low_val is None:
                 return False
             return comp_val < low_val if exclusive else comp_val <= low_val
-        elif low_val is None:           # (comp_val, ref_val, None) => chequea comp_val >= ref_val
+        elif low_val is None:           # (_comp_val, ref_val, None) => chequea _comp_val >= ref_val
             if comp_val is None:
                 return False
             return comp_val > ref_val if exclusive else comp_val >= ref_val
@@ -627,7 +645,7 @@ def compare_range(comp_val, ref_val, low_val=VOID, high_val=VOID, *, exclusive=F
             except (TypeError, ValueError):
                 return False
             return low_dev < comp_val < high_dev if exclusive else low_dev <= comp_val <= high_dev
-    else:                                          # All 3 values passed. Compares as ref-low <= comp_val <= ref+high.
+    else:                                          # All 3 values passed. Compares as ref-low <= _comp_val <= ref+high.
         if any(j is None for j in (ref_val, low_val, high_val)):
             return False
         try:
@@ -677,13 +695,13 @@ def nested_dict_iterator_gen(dicto):   # TODO(cmt): generator function (usa yiel
 # singleton NO ES una funcion normal. Por ser un decorator, se ejecuta de manera especial solo durante la inicializacion
 def singleton(cls):         # TODO(cmt): Class Decorator function -> All activities and handlers are singletons.
     """ Makes a class a Singleton class (1 instance only) - OJO: SIEMPRE retorna un instance.  ==> NO SIRVE PARA LLAMAR
-    CLASS/STATIC METHODS NI PARA HACER TYPE CHECKS (isinstance, type, is) TAL COMO ESTA
+    CLASS/STATIC METHODS NI PARA HACER TYPE CHECKS (isinstance, type, is).
     Para un full-fledged singleton implementation, hacer override de __new__() dentro de la definicion de la clase.
     (ver SQLiteQueueDatabase class)
     """
     @functools.wraps(cls)
     def wrapper_singleton(*args, **kwargs):
-        if not wrapper_singleton.instance:
+        if wrapper_singleton.instance is None:
             wrapper_singleton.instance = cls(*args, **kwargs)       # Crea Objeto (solo si no existia)
         return wrapper_singleton.instance                           # Retorna objeto al llamador
     wrapper_singleton.instance = None
@@ -692,7 +710,7 @@ def singleton(cls):         # TODO(cmt): Class Decorator function -> All activit
 
 def timerWrapper(iterations=1, verbose=False):
     """ Wrapper implemented to be able to pass parameters (iterations, etc) to timerDecorator(). """
-    def timerDecorator(func):  # Timer wrapper para medir tiempo de ejecucion de funciones de background.
+    def timerDecorator(func):           # Timer wrapper para medir tiempo de ejecucion de func.
         """ Timer @decorator to time execution of function calls. """
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
@@ -720,6 +738,23 @@ def timerWrapper(iterations=1, verbose=False):
         timerDecorator.__loopIterations = iterations if type(iterations) is int and iterations > 0 else 1
         return wrapper
     return timerDecorator
+
+
+def func_waiter(event: Event = None):       # 07-Jul-24: Func. is not yet used in the code.
+    """ Wrapper implemented to pass parameters (Event obj, timeout) to function that waits for completion of a task. """
+    def wrapper_waiter(func):           # Timer wrapper para medir tiempo de ejecucion de func.
+        """ function that waits for func to complete execution. """
+        @functools.wraps(func)
+        def wrapper(*args, launch_in_thread=False, **kwargs):
+            if launch_in_thread is True:
+                return OBJECT  # OBJECT -> Signals caller that the function is to be run in a separate thread.
+            event.set()                         # Signals that func is under execution.
+            val = func(*args, **kwargs)
+            event.clear()                       # Signals that func is has completed execution.
+            return val
+        return wrapper
+    return wrapper_waiter
+
 
 # print() decorator to enable/disable print() calls via system parameter DISMISS_PRINT
 def printWrapper(func):
@@ -769,7 +804,7 @@ def getEventDate(*, tblDate=None, defaultVal=None, **kwargs):
         try:
             eventDate = datetime.strptime(eventDate, fDateTime)     # 1ro: eventDate de tblData('fldDate')
         except(ValueError, TypeError, AttributeError, NameError):
-            eventDate = datetime_from_kwargs(**kwargs)              # 2do: eventDate de kwargs
+            eventDate = datetime_from_kwargs(**kwargs)              # 2do: eventDate de kwargs. key: 'date'
             if not eventDate:
                 defaultVal = defaultVal if isinstance(defaultVal, datetime) else datetime.fromtimestamp(time_mt())
         eventDate = eventDate if eventDate else defaultVal           # 3ro: eventDate = defaultValue
@@ -792,33 +827,19 @@ def trunc_datetime(dt: datetime, trunc_val=None):
         return dt
 
 
-def kwargsStrip(**kwargs):
-    """
-    Strips all trailing and leading blanks from key names in kwargs. Strips 1 level of kwargs (NO NESTED kwargs).
-
-    @return: **kwargs (dict) with all leading and trailing blanks stripped from key names.
-    """
-    retDict = {}
-    for k in kwargs:
-        try:
-            retDict[str(k).strip()] = kwargs[k]             # Hace strip() solo de keys tipo str.
-        except (TypeError, ValueError, AttributeError):
-            retDict[k] = kwargs[k]
-    return retDict
-
 def in_between_nums(num0=None, *, lower_limit=None, upper_limit=None, exclusive=False):
     """
-    Compares 3 numbers (int, float or complex). True if num0 is between lower_limit and upper_limit.
-    @param lower_limit:
-    @param upper_limit:
+    Compares 3 numbers (int, float or datetime). True if num0 is between lower_limit and upper_limit.
+    @param lower_limit: int, float or datetime.
+    @param upper_limit: int, float or datetime.
     @param exclusive: True: uses < ; False: uses <=
     @param num0:  number to compare between lower_limit and upper_limit,
     @return: True/False. All types not in (int, float, complex) result in False.
     """
-    if not isinstance(num0, (int, float, complex, datetime)):
+    if not isinstance(num0, (int, float, datetime)):
         return False             # Retorna False  si no se provee num0.
-    lowLimit = lower_limit if isinstance(lower_limit, (int, float, complex, datetime)) else None
-    uppLimit = upper_limit if isinstance(upper_limit, (int, float, complex, datetime)) else None
+    lowLimit = lower_limit if isinstance(lower_limit, (int, float, datetime)) else None
+    uppLimit = upper_limit if isinstance(upper_limit, (int, float, datetime)) else None
     if lowLimit is None and uppLimit is None:
         return False
     comp1 = (lowLimit < num0 if exclusive else lowLimit <= num0) if lowLimit is not None else True
@@ -841,90 +862,101 @@ def valiDate(str_date: str, defaultVal=None):
 
 # ########################################## Used code down to here. The rest is not used #############################
 
+# def kwargsStrip(**kwargs):
+#     """
+#     Strips all trailing and leading blanks from key names in kwargs. Strips 1 level of kwargs (NO NESTED kwargs).
+#     @return: **kwargs (dict) with all leading and trailing blanks stripped from key names.
+#     """
+#     retDict = {}
+#     for k in kwargs:
+#         try:
+#             retDict[str(k).strip()] = kwargs[k]             # Hace strip() solo de keys tipo str.
+#         except (TypeError, ValueError, AttributeError):
+#             retDict[k] = kwargs[k]
+#     return retDict
 
 
-
-def tblNameFromUID(fldUID: str):
-    try:
-        if all(fldUID.strip().__contains__(j) for j in ('tbl', uidCh)):
-            sep = fldUID.find(uidCh)
-            if sep > 0:
-                return fldUID[:sep]
-        return None
-    except(AttributeError, NameError):
-        return None
-
-
-def fldNameFromUID(fldUID: str):
-    try:
-        if all(fldUID.strip().__contains__(j) for j in ('tbl', uidCh)):
-            sep = fldUID.find(uidCh)
-            if sep > 0:
-                return fldUID[sep+len_uidCh:]
-        return fldUID
-    except (AttributeError, NameError):
-        return fldUID
+# def tblNameFromUID(fldUID: str):
+#     try:
+#         if all(fldUID.strip().__contains__(j) for j in ('tbl', uidCh)):
+#             sep = fldUID.find(uidCh)
+#             if sep > 0:
+#                 return fldUID[:sep]
+#         return None
+#     except(AttributeError, NameError):
+#         return None
+#
+#
+# def fldNameFromUID(fldUID: str):
+#     try:
+#         if all(fldUID.strip().__contains__(j) for j in ('tbl', uidCh)):
+#             sep = fldUID.find(uidCh)
+#             if sep > 0:
+#                 return fldUID[sep+len_uidCh:]
+#         return fldUID
+#     except (AttributeError, NameError):
+#         return fldUID
 
 
 # -------------------------------- Funcion para ejecutar codigo pasado como string ---------------------------------- #
-def eval_expression(input_string, allowed_names):
-    # print(f'Locals: {locals()}')
-    try:
-        code = compile(input_string, "<string>", "eval")
-    # except(SyntaxError, TypeError, AttributeError, EOFError, KeyError, SystemError, IndentationError,
-    #        OSError, NameError, ZeroDivisionError, UnboundLocalError, ImportError, FloatingPointError):
-    except Exception:
-        print(f'ERR_Sys: Compile error. {moduleName()}({lineNum()}) - {callerFunction()}', dismiss_print=DISMISS_PRINT)
-        return False
-    for name in code.co_names:
-        if name not in allowed_names.values():
-            raise NameError(f'Use of {name} not allowed')
-    retValue = eval(code, {"__builtins__": {}}, allowed_names)
-    return retValue
+# def eval_expression(input_string, allowed_names):
+#     # print(f'Locals: {locals()}')
+#     try:
+#         code = compile(input_string, "<string>", "eval")
+#     # except(SyntaxError, TypeError, AttributeError, EOFError, KeyError, SystemError, IndentationError,
+#     #        OSError, NameError, ZeroDivisionError, UnboundLocalError, ImportError, FloatingPointError):
+#     except Exception:
+#         print(f'ERR_Sys: Compile error. {moduleName()}({lineNum()}) - {callerFunction()}',dismiss_print=DISMISS_PRINT)
+#         return False
+#     for name in code.co_names:
+#         if name not in allowed_names.values():
+#             raise NameError(f'Use of {name} not allowed')
+#     retValue = eval(code, {"__builtins__": {}}, allowed_names)
+#     return retValue
 
 # ================================================================================================================= #
 
 
 # Seteo basico de args para DeepDiff. Necesario para dictCompare().
-deepDiff_args = {'ignore_string_case': True, 'ignore_string_type_changes': True, 'ignore_numeric_type_changes': True,
-                    'ignore_order': True, 'truncate_datetime': 'day', 'verbose_level': 1}
+# deepDiff_args = {'ignore_string_case': True, 'ignore_string_type_changes': True, 'ignore_numeric_type_changes': True,
+#                     'ignore_order': True, 'truncate_datetime': 'day', 'verbose_level': 1}
 
-def dictCompare(dict1: dict, dict2: dict, *, compare_args=None):
-    """Diffs to dict using DeepDiff and returning the changes ready to print
-    dict1 is expanded with keys from new, with their respective values.
-    Returns a tuple of added, removed and updated
-    """
-    # dict1.update({k: dict1[k] for k in dict2})        #  Original: dict1 = {k: dict1[k] for k in dict2}
-    compare_args = compare_args if isinstance(compare_args, dict) else {}
-    d = DeepDiff(dict1, dict2, **compare_args)
-    added = {}                                      # added: absent in dict1 (execute), present in dict2 (paFields)
-    removed = set()                                 # removed: present in dict1 (execute), absent in dict2 (paFields)
-    changed = d.get("values_changed", dict())       # changed: present in dict1 and dict2: Values and/or types changed.
-    for key_change, change in d.get("type_changes", dict()).items():
-        if change["new_value"] == change["old_value"]:    # str vs unicode type changes
-            continue
-        else:
-            changed[key_change] = change
-    for key in ["dictionary_item_added", "iterable_item_added", "attribute_added", "set_item_added"]:
-        if d.get(key, None):
-            added[key] = d.get(key)
-        # added = added.union(d.get(key, set()))
-    for key in ["dictionary_item_removed", "iterable_item_removed", "attribute_removed", "set_item_removed"]:
-        removed = removed.union(d.get(key, set()))
-    return added, removed, changed
+# def dictCompare(dict1: dict, dict2: dict, *, compare_args=None):
+#     """Diffs to dict using DeepDiff and returning the changes ready to print
+#     dict1 is expanded with keys from new, with their respective values.
+#     Returns a tuple of added, removed and updated
+#     """
+#     # dict1.update({k: dict1[k] for k in dict2})        #  Original: dict1 = {k: dict1[k] for k in dict2}
+#     compare_args = compare_args if isinstance(compare_args, dict) else {}
+#     d = DeepDiff(dict1, dict2, **compare_args)
+#     added = {}                                      # added: absent in dict1 (execute), present in dict2 (paFields)
+#     removed = set()                                 # removed: present in dict1 (execute), absent in dict2 (paFields)
+#     changed = d.get("values_changed", dict())       # changed: present in dict1 and dict2: Values and/or types changed.
+#     for key_change, change in d.get("type_changes", dict()).items():
+#         if change["new_value"] == change["old_value"]:    # str vs unicode type changes
+#             continue
+#         else:
+#             changed[key_change] = change
+#     for key in ["dictionary_item_added", "iterable_item_added", "attribute_added", "set_item_added"]:
+#         if d.get(key, None):
+#             added[key] = d.get(key)
+#         # added = added.union(d.get(key, set()))
+#     for key in ["dictionary_item_removed", "iterable_item_removed", "attribute_removed", "set_item_removed"]:
+#         removed = removed.union(d.get(key, set()))
+#     return added, removed, changed
 
 
-def nested_dict_iterator_gen2(dicto):  # Este es el que se usa para implementar las comparaciones DeepDiff. No usado.
-    """ This function accepts a nested dictionary as argument and iterate over all values of nested dictionaries """
-    # Iterate over all key-value pairs of dict argument
-    for key, value in dicto.items():
-        if isinstance(value, dict):                         # Check if value is of dict type
-            for kv_pair in nested_dict_iterator_gen2(value):  # If value is dict then iterate over all its values
-                yield {key: (*kv_pair,)}
-        else:
-            yield {key: value}   # If value is not dict type then yield the value
-
-reservedDictKeys = ['new_value', 'old_value']  # Valores usados internamente por DeepDiff que se tienen que discriminar
+# def nested_dict_iterator_gen2(dicto):  # Este es el que se usa para implementar las comparaciones DeepDiff. No usado.
+#     """ This function accepts a nested dictionary as argument and iterate over all values of nested dictionaries """
+#     # Iterate over all key-value pairs of dict argument
+#     for key, value in dicto.items():
+#         if isinstance(value, dict):                         # Check if value is of dict type
+#             for kv_pair in nested_dict_iterator_gen2(value):  # If value is dict then iterate over all its values
+#                 yield {key: (*kv_pair,)}
+#         else:
+#             yield {key: value}   # If value is not dict type then yield the value
+#
+# reservedDictKeys = ['new_value', 'old_value']  # Valores usados internamente por DeepDiff que se tienen que discriminar
 
 
 

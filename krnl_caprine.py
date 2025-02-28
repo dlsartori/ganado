@@ -20,13 +20,15 @@ class Config:
 class Caprine(Mammal):
     # __objClass = 6
     # __objType = 1
-    __moduleRunning = 1   # Flag que indica si el modulo de la clase de Animal se esta ejecutando. TODO: Ver como setear
+    # __moduleRunning = 1   # Flag que indica si el modulo de la clase de Animal se esta ejecutando. TODO: Ver como setear
     _kindOfAnimalID = 2      # Caprino = 2
-    __registerDict = {}  # {idAnimal: objAnimal}-> Registro General de Animales: Almacena Animales de la clase
+    __uses_tags = True      # Flags initialization routine to create class TagCaprine to handle all tags for Caprines.
 
-    @classmethod
-    def getRegisterDict(cls):
-        return cls.__registerDict
+    # __registerDict = {}  # {idAnimal: objAnimal}-> Registro General de Animales: Almacena Animales de la clase
+
+    # @classmethod
+    # def getRegisterDict(cls):
+    #     return cls.__registerDict
 
     # @classmethod
     # def getKindOfAnimal(cls):
@@ -126,12 +128,12 @@ class Caprine(Mammal):
             # user = ArgsCaprine(tags=args, kwargs=kwargs)
             kwargs = self.validate_kwargs(kwargs)
             result = True
-        except (TypeError, ValueError, ValidationError) as e:
+        except (TypeError, ValueError) as e:
             print(f'{e}')
             result = False
 
         if result is False:
-            isValid = False  # Sale con __isValidFlag = False
+            isValid = False  # Sale con _isValidFlag = False
             isActive = False     # No se puede crear un tag valido faltando alguno de estos argumentos.
             myID = False
             # mf = None                # Esta linea y abajo: por compatibilidad de argumentos solamente.
@@ -194,7 +196,7 @@ class Caprine(Mammal):
             raise ValueError(f'ERR_INP_InvalidArgument: ID_Animal and/or Fecha De Nacimiento are missing.')
 
     @classmethod
-    def getTotalCount(cls, mode=1):          # Total Bovine Animals in __registerDict.
+    def getCount(cls, mode=1):          # Total Bovine Animals in __registerDict.
         """
         Counts total animals for given Animal Class.
         @param mode: 0: ALL ID_Animal in Animal.__registerDict for given class.
@@ -271,65 +273,12 @@ class CategoryActivity(CaprineActivity):
         kwargs['category'] = category
         retValue = self._setCategory(*args, **kwargs)
         retValue = True if isinstance(retValue, int) else False
-        if self._doInventory(**kwargs):
+        if self.doInventory(**kwargs):
             _ = self.outerObject.inventory.set()
         return retValue
 
 
 
-
-
-
-    # def set(self, *args, **kwargs):             # TODO: Verificar que category.set() funcione...
-    #     """
-    #     @param args: DataTable objects with obj_data to write to DB
-    #     @param kwargs:  'enforce'=True: forces the Category val irrespective of __statusPermittedDict conditions
-    #                      'categoryID': Category number to set, if Category number is not passed via tblData
-    #     @return: True if success; False if fail
-    #     """
-    #     # lower_kwargs = {key.strip().lower(): kwargs[key] for key in kwargs} if len(kwargs) > 0 else {}
-    #     tblData = setupArgs(self.__tblDataName, *args, **kwargs)
-    #
-    #     categID = next((int(kwargs[j]) for j in kwargs if str(j).lower().__contains__('categoryid')), None)
-    #     categID = categID if categID in Caprine.categories.values() else None        # Valida categoryID
-    #     enforce = next((int(kwargs[j]) for j in kwargs if str(j).lower().__contains__('enforce')), False)
-    #
-    #     if self.isValid and self.outerObject.validateActivity(self.__activityName):
-    #         if 'fldFK_Categoria' in tblData.fldNames:       # Procesa Categoria de tblData
-    #             categoryID = tblData.getVal(0, 'fldFK_Categoria') if tblData.getVal(0, 'fldFK_Categoria') \
-    #                                         in Caprine.categories.values() else categID   # Valida categoryID
-    #         else:
-    #             categoryID = categID
-    #         if categoryID is None:
-    #             retValue = f'ERR_INP_ArgumentsNotValid: Category not valid or missing. Func/Method:category.set()'
-    #             print(f'{moduleName()}({lineNum()} - {retValue}')
-    #             return retValue
-    #
-    #         if categoryID is not None and (categoryID in self.__permittedDict[self.outerObject.lastCategoryID] or
-    #                                        enforce not in (None, 0, False)):
-    #             tblRA = setupArgs(self._tblRAName, *args)
-    #             tblLink = setupArgs(self._geTblLinkName, *args)
-    #             tblData.setVal(0, fldFK_Categoria=categoryID)
-    #             lock = Lock()
-    #             # with lock:               # Lock para actualizar tablas y EntityObject.lastCategoryID
-    #             idActividadRA = self._createActivityRA(tblRA, tblLink, tblData, *args, **kwargs)
-    #             if isinstance(idActividadRA, int):
-    #                 self.outerObject.lastCategoryID = categoryID        # Fin del bloque with. Libera lock
-    #
-    #             if isinstance(idActividadRA, str):  # str: Hubo error de escritura
-    #                 retValue = f'ERR_DB_WriteError {idActividadRA} - {callerFunction()}'
-    #                 print(f'{moduleName()}({lineNum()}) - {retValue}')
-    #             else:
-    #                 retValue = idActividadRA
-    #         else:
-    #             retValue = f'ERR_INP_InvalidArgument: Category ID: {categoryID} - {callerFunction()}'
-    #             print(f'{moduleName()}({lineNum()})  - {retValue}')
-    #     else:
-    #         retValue = f'ERR_Sys_ObjectNotValid or ERR_INP_ActivityNotDefined - {callerFunction()}'
-    #         print(f'{moduleName()}({lineNum()})  - {retValue}')
-    #     return retValue
-
-    # @Activity.dynamic_attr_wrapper
     def get(self, sDate='', eDate='', **kwargs):
         """
         Returns records in table Data Animales Categorias between sValue and eValue. sValue=eValue ='' ->Last record
@@ -435,26 +384,26 @@ class CategoryActivity(CaprineActivity):
             retValue = None
         return retValue
 
-    @classmethod
-    def updateCategories_bkgd(cls):
-        """
-        Background method to update category for Caprines. Called by krnl_threading module, executed in a Timer thread.
-        Daemon Function.
-        @return:
-        """
-        for j in cls.__registerDict.values():
-            j.category.compute(verbose=True)
+    # @classmethod
+    # def updateCategories_bkgd(cls):
+    #     """
+    #     Background method to update category for Caprines. Called by krnl_threading module, executed in a Timer thread.
+    #     Daemon Function.
+    #     @return:
+    #     """
+    #     for j in cls.__registerDict.values():
+    #         j.category.compute(verbose=True, initial_category=j.category.get())
 
-    @classmethod
-    def updateTimeout_bkgd(cls):
-        """
-        Background method to update Timeout for Caprines. Called by krnl_threading module, executed in a Timer thread.
-        Daemon Function.
-        @return:
-        """
-        for k in cls.__registerDict.values():
-            if not k.isDummy:        # Dummies no entran en Timeout.
-                k.updateTimeout()    # Calls method updateTimeout() in entityObject. Same method for all EO subclasses
+    # @classmethod
+    # def updateTimeout_bkgd(cls):
+    #     """
+    #     Background method to update Timeout for Caprines. Called by krnl_threading module, executed in a Timer thread.
+    #     Daemon Function.
+    #     @return:
+    #     """
+    #     for k in cls.__registerDict.values():
+    #         if not k.isDummy:        # Dummies no entran en Timeout.
+    #             k.updateTimeout()    # Calls method updateTimeout() in entityObject. Same method for all EO subclasses
 
 # TODO: Este metodo se debe ejecutar al lanzar el modulo de Caprinos. Ver como hacer esto!
 

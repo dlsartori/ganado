@@ -1,5 +1,5 @@
-from krnl_entityObject import *
-
+from krnl_entityObject import EntityObject
+import os
 
 @property
 def moduleName():
@@ -10,8 +10,8 @@ class Asset(EntityObject):
     objClass = 2
     objType = 1
 
-    def __init__(self, ID_Obj, isValid, isActive, *args, **kwargs):
-        EntityObject.__init__(self, ID_Obj, isValid, isActive, *args, **kwargs)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
 
 

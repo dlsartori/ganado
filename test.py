@@ -4,7 +4,6 @@ from krnl_entityObject import *
 from krnl_tag import *
 from krnl_abstract_class_animal import *
 from krnl_bovine import *
-from krnl_geo_new import handlerGeo
 from inspect import currentframe, getframeinfo
 import concurrent.futures                   # habilita ThreadPoolExecutor
 
@@ -50,7 +49,7 @@ if __name__ == '__main__':
     bovines[8].status.set(status='Timeout')
     # bovines[7].tm.set(fldFK_ActividadTM=10032)
     bovines[7].tm.get()
-    print(f'TEST.PY({lineNum()}) Bovine.getTotalAnimals Function: {Bovine.getTotalCount()} ')
+    print(f'TEST.PY({lineNum()}) Bovine.getTotalAnimals Function: {Bovine.getCount()} ')
     boviLocaliz = bovines[7].localization.get().unpackItem(0)
     print(f'TEST.PY({lineNum()}) bovine[{7}] Localization: {boviLocaliz}')
 

@@ -1,7 +1,7 @@
 import sys
 from datetime import datetime
 import inspect
-from krnl_sqlite import *
+from krnl_db_query import *
 import time
 from time import sleep
 from krnl_config import fDateTime

@@ -1,12 +1,16 @@
+import pandas as pd
+
 from krnl_abstract_class_activity import *
 from krnl_abstract_class_prog_activity import ProgActivity
-from krnl_geo_new import Geo
+import uuid
+from krnl_geo import Geo
 from krnl_tag import Tag
 from krnl_tag_bovine import TagAnimal, TagBovine
 from krnl_person import Person
-from krnl_custom_types import setupArgs, setRecord, delRecord
+from krnl_custom_types import setupArgs, setRecord, delRecord, getTblName, getFldName, AbstractMemoryData
 from krnl_config import krnl_logger, compare_range
-from krnl_sqlite import getTblName, getFldName
+# from collections.abc import Iterable
+import collections.abc
 import threading
 
 def moduleName():
@@ -14,26 +18,36 @@ def moduleName():
 
 
 class AnimalActivity(Activity):     # Abstract Class (no lleva ningun instance attributte). NO se instancia.
-    __abstract_class = True     # Activity runs the __init_subclass() function to initialize all subclasses.
+    # __abstract_class = True     # Activity runs the __init_subclass() function to initialize all subclasses.
+    # dict used with Activity classes. Accessed from Activity class. Stores AnimalActivity class objects.
+    # Used to create Activity instance objects and to bind, when applicable, ActivityClasses with Object classes.
+    _activity_class_register = {}  # {ActivityClass: ObjectClass | None, }
 
-    # Accessed from Activity class. Stores AnimalActivity class objects.
-    _activity_class_register = set()    # Classes used to create instance objects for each AnimalActivity.
+    # Lists all Activity classes that support memory data, for access and initialization.
+    _memory_data_classes = set()  # Initialized on creation of Activity classes. Defined here to include all Activities.
 
-    def __call__(self, caller_object=None):
+    def __call__(self, caller_obj=None):
         """            *** This method is inherited and can be accessed from derived classes. Cool!! ****
-        __call__ is invoked when an instance is followed by parenthesis (instance_obj()) or when a property is defined
-        on the instance, and the property is invoked (inventory.get(): in this case __call__ is invoked for the object
-        associated with inventory property before making the get() call. Then, outerObject is properly initialized.)
-        @param caller_object: instance of Bovine, etc. that invokes the Activity. How this binding works is shown at
+        __call__ is invoked when an instance is followed by parenthesis (instance_classmethod()) or when a property is
+        defined on the instance, and the property is invoked (inventory.get(): in this case __call__ is invoked for the
+        obj associated with inventory property before making the get() call. Then, outerObject is properly initialized.)
+        @param caller_obj: instance of Bovine, etc. that invokes the Activity. How this binding works is explained at
         https://stackoverflow.com/questions/57125769/when-the-python-call-method-gets-extra-first-argument
-
-        @return: Activity object invoking __call__()
+        @return: Activity obj invoking __call__() or None. The meaning of None is relevant to call without outerObject.
         """
-        # item_obj=None above is important to allow to call fget() like that, without having to pass dummy parameters.
-        # print(f'\n>>>>>>>>>>>>>>>>>>>> {self._decoratorName}.__call__() params - args: {(caller_object.ID, *args)}; '
+        # caller_obj=None above is important to allow to call fget() like that, without having to pass dummy parameters.
+        # print(f'\n>>>>>>>>>>>>>>>>>>>> {self._decoratorName}.__call__() params - args: {(caller_obj.ID, *args)}; '
         #       f'kwargs: {kwargs}')
-        self.outerObject = caller_object  # item_object es instance de Animal, Tag, etc. NO PUEDE SER class.
+        self.outerObject = caller_obj  # caller_obj es instance de Animal, Tag, etc, o Class cuando llama classmethod.
+
+        # 10Aug24: The key issue is that called functions HAVE TO BE inside this block, or caller_obj cannot be bound
+        # inside those functions.
+        # But there is no way to know, right here, which method in Activity will be called after __call__() returns.
+        # So using closures in this context is not viable. Must stick with self.outerObject.
+        # print(f'_call closure id: {self.__call__.__closure__}')
+
         return self
+
 
     # Class Attributes: Tablas que son usadas por todas las instancias de InventoryActivityAnimal
     __tblRAName = 'tblAnimalesRegistroDeActividades'
@@ -41,11 +55,12 @@ class AnimalActivity(Activity):     # Abstract Class (no lleva ningun instance a
     __tblObjectsName = 'tblAnimales'     # Si hay que cambiar estos nombres usar InventoryActivityAnimal.__setattr__()
     __tblObjectDBName = getTblName(__tblObjectsName)
     __tblLinkName = 'tblLinkAnimalesActividades'
+    __tblLinkDBName = getTblName(__tblLinkName)
     __tblDataCategoryName = 'tblDataAnimalesCategorias'
     __tblProgStatusName = 'tblDataActividadesProgramadasStatus'       # __tblPADataStatusName
     __tblProgActivitiesName = 'tblDataProgramacionDeActividades'
     __tblPATriggersName = 'tblAnimalesActividadesProgramadasTriggers'
-    __lock = Lock()
+
 
     @classmethod
     def tblObjDBName(cls):
@@ -63,16 +78,45 @@ class AnimalActivity(Activity):     # Abstract Class (no lleva ningun instance a
     def tblObjName(cls):
         return cls.__tblObjectsName
 
+    @classmethod
+    def tblLinkName(cls):
+        return cls.__tblLinkName
 
-    temp = getRecords('tblAnimalesActividadesNombres', '', '', None, 'fldID', 'fldName', 'fldFlag',
-                      'fldFK_ClaseDeAnimal', 'fldFlagPA', 'fldPAExcludedFields', 'fldDecoratorName','fldTableAndFields',
-                      'fldFilterField')
+    @classmethod
+    def tblLinkDBName(cls):
+        return cls.__tblLinkDBName
+
+    @classmethod
+    def getTblObjectsName(cls):
+        return cls.__tblObjectsName
+
+    @classmethod
+    def getTblRAName(cls):
+        return cls.__tblRAName
+
+    @classmethod
+    def getTblLinkName(cls):
+        return cls.__tblLinkName
+
+
+    tempdf = getrecords('tblAnimalesClases', 'fldID', 'fldAnimalClass')
+    __animalKinds = dict(zip(tempdf['fldAnimalClass'], tempdf['fldID']))  # {Clase De Animal (str): animalClassID}
+    del tempdf
+
+    @classmethod
+    def getAnimalKinds(cls):  # Repeat func. Needed here for convenience, to parameterize definition of Animal classes.
+        return cls.__animalKinds  # {'Bovine': 1, 'Caprine':2, 'Ovine':3, etc } -> leido de DB.
+
+    tempdf = getrecords('tblAnimalesActividadesNombres', 'fldID', 'fldName', 'fldFlag', 'fldFK_ClaseDeAnimal',
+                        'fldFlagPA', 'fldPAExcludedFields', 'fldDecoratorName', 'fldTableAndFields', 'fldFilterField',
+                        'fldAdHocMethods')
     _activitiesDict = {}           # {Nombre Actividad: ID_Actividad, }
-    _isInventoryActivity = {}
+    __inventoryActivitiesDict = {}      # {Nombre Actividad: isInventory (True/False), }
     _activitiesForMyClass = {}
     _genericActivitiesDict = {}  # {Nombre Actividad: (activityID,decoratorName,tblName,qryFieldName,filterField), }
-    __supportPADict = {}          # {activity_name: activityID, } con getSupportPADict=True
+    _supportsPADict = {}          # {activity_name: activityID, } con getSupportsPADict=True
     __paRegisterDict = {}  # {self: ActivityID} Register de las Actividades Programadas ACTIVAS de class AnimalActivity
+
 
     # Variables para logica de manejo de objetos repetidos/duplicados.
     _fldID_list = []  # List of all active records pulled by getRecords() from tblAnimales.
@@ -80,26 +124,25 @@ class AnimalActivity(Activity):     # Abstract Class (no lleva ningun instance a
     _object_fldUPDATE_dict = {}  # {fldID: fldUPDATE_counter, }        Keeps a dict of uuid values of fldUPDATE fields
     # _RA_fldUPDATE_dict = {}  # {fldID: fldUPDATE_counter, }      # TODO: ver si este hace falta.
     # _RAP_fldUPDATE_dict = {}  # {fldID: fldUPDATE_counter, }      # TODO: ver si este hace falta.
-    temp0 = getRecords(__tblRAName, '', '', None, 'fldID')
-    if isinstance(temp0, DataTable) and temp0.dataLen:
+    temp0df = getrecords(__tblRAName, 'fldID')
+    if len(temp0df.index):
         # Initializes _fldID_list with all fldIDs for Triggers that detect INSERT operations.
-        _fldID_list = temp0.getCol('fldID')
+        _fldID_list = temp0df['fldID'].tolist()
 
     __classExcludedFieldsClose = {"fldWindowLowerLimit", "fldWindowUpperLimit", "fldFK_Secuencia",
                                   "fldDaysToAlert", "fldDaysToExpire"}.union(Activity._getBaseExcludedFields())
     __classExcludedFieldsCreate = {"fldPADataCreacion"}.union(Activity._getBaseExcludedFields())
-
     _activityExcludedFieldsClose = {}  # {activityID: (excluded_fields, ) }
     __activityExcludedFieldsCreate = {}  # {activityID: (excluded_fields, ) }
 
     # Creates dictionary with GenericActivity data. Each item in the dictionary will generate 1 GenericActivity object.
-    for j in range(temp.dataLen):
-        d = temp.unpackItem(j)
+    for i, row in tempdf.iterrows():
+        d = row.to_dict()
         if d['fldTableAndFields'] and d['fldDecoratorName'] and "." in d['fldTableAndFields']:
             tbl_flds = d['fldTableAndFields'].split(".")
             _genericActivitiesDict[d['fldName']] = (d['fldID'], d['fldDecoratorName'], tbl_flds[0], tbl_flds[1],
-                                                     d['fldFilterField'] or 'fldDate')
-    print(f'------------{moduleName()}.{lineNum()}-- _genericActivitiesDict: {_genericActivitiesDict}',
+                                                     d['fldFilterField'] or 'fldDate', d['fldAdHocMethods'])
+    print(f'--------- {moduleName()}.{lineNum()}----- _genericActivitiesDict: {_genericActivitiesDict}',
           dismiss_print=DISMISS_PRINT)
 
 
@@ -120,21 +163,23 @@ class AnimalActivity(Activity):     # Abstract Class (no lleva ningun instance a
         return cls.__definedActivities  # {'activity_name': activityObj}.Used to avoid duplication with GenericActivity.
 
     @classmethod
-    def getSupportPADict(cls):
-        return cls.__supportPADict    # {ActivityName: __activityID, } con getSupportPADict=True
+    def getSupportsPADict(cls):
+        return cls._supportsPADict    # {ActivityName: __activityID, } con getSupportsPADict=True
 
-    for j in range(temp.dataLen):
-        _activitiesDict[temp.dataList[j][1]] = temp.dataList[j][0]       # {Nombre Actividad: ID_Actividad, }
-        _isInventoryActivity[temp.dataList[j][1]] = temp.dataList[j][2]  # {Nombre Actividad:_isInventoryActivity(1/0),}
-        _activitiesForMyClass[temp.dataList[j][1]] = temp.dataList[j][3]  # {Nombre Actividad: AnimalClass, }
-        if bool(temp.dataList[j][4]):
-            __supportPADict[temp.dataList[j][1]] = temp.dataList[j][0]  # {ActivityName: __activityID, }, supportPA=True
+    # ('fldID', 'fldName', 'fldFlag', 'fldFK_ClaseDeAnimal', 'fldFlagPA', 'fldPAExcludedFields', 'fldDecoratorName',
+    #      'fldTableAndFields', 'fldFilterField', 'fldAdHocMethods')
 
+    for i, row in tempdf.iterrows():
+        _activitiesDict[row['fldName']] = row['fldID']            # {Nombre Actividad: ID_Actividad, }
+        __inventoryActivitiesDict[row['fldID']] = row['fldFlag']  # {Nombre Actividad: Inv. Activity (1/0),}
+        _activitiesForMyClass[row['fldName']] = row['fldFK_ClaseDeAnimal']  # {Nombre Actividad: AnimalClass, }
+        if bool(row['fldFlagPA']):
+            _supportsPADict[row['fldName']] = row['fldID']  # {ActivityName: __activityID, }, supportPA=True
         # {Nombre Actividad: excluded_fields,}
-        _activityExcludedFieldsClose[temp.dataList[j][1]] = set(temp.dataList[j][5] or set()).union(__classExcludedFieldsClose)
-
-    del temp
-    del temp0
+        _activityExcludedFieldsClose[row['fldName']] = \
+            set(row['fldPAExcludedFields'] or set()).union(__classExcludedFieldsClose)
+    del tempdf
+    del temp0df
 
 
     def __new__(cls, *args, **kwargs):
@@ -146,7 +191,7 @@ class AnimalActivity(Activity):     # Abstract Class (no lleva ningun instance a
     def __init__(self, activityName=None, *args, activity_enable=activityEnableFull, tbl_data_name='',
                  excluded_fields_close=(), **kwargs):
         activityID = self._activitiesDict.get(activityName)
-        invActivity = self._isInventoryActivity.get(activityName)
+        invActivity = self.__inventoryActivitiesDict.get(activityName)
         kwargs['tblProgStatusName'] = self.__tblProgStatusName
         kwargs['tblProgActivitiesName'] = self.__tblProgActivitiesName
         kwargs['excluded_fields'] = self.getActivityExcludedFieldsClose(activity_name=activityName) or set() .\
@@ -154,15 +199,11 @@ class AnimalActivity(Activity):     # Abstract Class (no lleva ningun instance a
         isValid = True
         if kwargs.get('supportsPA', None) is None:
             # IMPORTANT SETTING: Si no hay override desde abajo, setea al valor de _supportsPA{} para ese __activityName
-            kwargs['supportsPA'] = bool(self.__supportPADict.get(activityName, False))
+            kwargs['supportsPA'] = bool(self._supportsPADict.get(activityName, False))
 
         super().__init__(isValid, activityName, activityID, invActivity, activity_enable, self.__tblRAName, *args,
                          tblDataName=tbl_data_name, tblObjectsName=self.__tblObjectsName,  **kwargs)     #
 
-        # # TODO(cmt): __outerAttr => ONLY 1 object per Activity and per Thread (recursion with a different object for
-        # #  SAME activity and SAME Thread is not supported). Used by all re-entrant methods (that could be called by
-        # #  different threads: Activity.__call__, _setInventory, _setStatus, _setLocaliz, _getRecordLinkTables, etc.).
-        # self.__outerAttr = {}  # Atributo DINAMICO. {threadID: outerObject, }
 
     @classmethod
     def getActivitiesDict(cls):
@@ -173,8 +214,8 @@ class AnimalActivity(Activity):     # Abstract Class (no lleva ningun instance a
         return self._activitiesDict          # {Nombre Actividad: ID_Actividad, }
 
     @classmethod
-    def getInventoryActivitiesDict(cls):
-        return cls._isInventoryActivity
+    def getInventoryActivitiesDict(cls):   # {Nombre Actividad: isInventory (1/0), }
+        return cls.__inventoryActivitiesDict
 
     @classmethod
     def tblDataCategoryName(cls):
@@ -184,7 +225,7 @@ class AnimalActivity(Activity):     # Abstract Class (no lleva ningun instance a
     def getPARegisterDict():           # TODO(cmt): AnimalActivity, ProgActivityAnimal directly linked.
         return ProgActivityAnimal.getPARegisterDict()       # {paObj: ActivityID}
 
-    def _classExecuteFields(self, **kwargs) -> dict:
+    def activityExecuteFields(self, **kwargs) -> dict:
         """ Function used to create the executeFields dict to be passed to _paMatchAndClose() method.
         Defines all Execution fields to compare against Close fields in ProgActivities and determine if self is a
         Closing Activity for the ProgActivities it is checked against.
@@ -193,7 +234,6 @@ class AnimalActivity(Activity):     # Abstract Class (no lleva ningun instance a
         kwargs.update({'fldFK_ClaseDeAnimal': self.outerObject.animalClassID()})
         return kwargs
                 # 'execution_date': execution_date,
-                # 'fldFK_ClaseDeAnimal': self.outerObject.animalClassID,
                 # 'ID': self.outerObject.ID,
                 # 'fldAgeDays': self.outerObject.age.get(),
                 # 'fldFK_Localizacion': self.outerObject.lastLocalization,
@@ -204,8 +244,10 @@ class AnimalActivity(Activity):     # Abstract Class (no lleva ningun instance a
 
     # ------------ Funciones de Categoria, generales para TODAS las clases de Animal. Vamos empezando por aqui,... ---#
 
+    # NEW VERSION
+    # @Activity.activity_tasks(after=(Activity.doInventory, Activity.paScheduler))
     def _setCategory(self, *args, excluded_fields=None, execute_fields=None, **kwargs):
-        """         TODO(cmt): THIS FUNCTION SHOULD BE DEPRECATED FOR ALL ANIMAL CLASSES 22-DEC-23.
+        """
         @param args: DataTable objects with obj_data to write to DB
         @param kwargs:  'enforce'=True: forces the Category val irrespective of __statusPermittedDict conditions
                          'categoryID': Category number to set, if Category number is not passed via tblData
@@ -214,270 +256,193 @@ class AnimalActivity(Activity):     # Abstract Class (no lleva ningun instance a
                  errorCode (str) if invalid category
         """
         outerObj = self.outerObject
-        tblData = next((j for j in args if j.tblName == self._tblDataName), DataTable(self._tblDataName))
+        if not outerObj or type(outerObj) is type:          # Only operates with objects. No good with classes.
+            raise TypeError(f'_setCategory() cannot be called by a class ({outerObj}). '
+                            f'Only to be called by an Activity object.')
+        dfRA = next((j for j in args if j.db.tbl_name == self._tblRAName), pd.DataFrame.db.create(self._tblRAName))
+        dfData = next((j for j in args if j.db.tbl_name == self._tblDataName),pd.DataFrame.db.create(self._tblDataName))
+
         # Procesa Categoria Y valida categoryID: Todo este mambo es para aceptar categorias como nombre y/o como ID
-        categoryID = tblData.getVal(0, 'fldFK_Categoria')
-        if categoryID not in outerObj.categories.values():
-            categID = removeAccents(next((kwargs[j] for j in kwargs if 'categ' in j.lower()), None))
-            categoryID = categID if categID in outerObj.categories.values() else \
-                next((outerObj.categories[j] for j in outerObj.categories if removeAccents(str(j))
-                      == categID), None)
+        categoryID = dfData.loc[0, 'fldFK_Categoria'] if len(dfData.index) > 0 else None
+        if categoryID not in outerObj.getCategories().values():  # Class access to attr. to generalize to obj or class.
+            categID = removeAccents(next((kwargs[j] for j in kwargs if 'cat' in j.lower()), None))
+            categoryID = categID if categID in outerObj.getCategories().values() else \
+                next((v for k, v in outerObj.getCategories().items() if removeAccents(str(k)) == categID), None)
         if categoryID is None:
-            retValue = f'ERR_INP_ArgumentsNotValid: Category not valid or missing. {callerFunction(getCallers=True)}'
+            retValue = f'ERR_INP_ArgumentsNotValid: Category not valid or missing: {str(categoryID)} - ' \
+                       f'{callerFunction(getCallers=True)}.'
             krnl_logger.info(retValue)
             print(f'{moduleName()}({lineNum()} - {retValue}', dismiss_print=DISMISS_PRINT)
             return retValue
 
-        lastCategory = outerObj.get_memory_data().get('last_category')  # Gets current category for outerObject.
-        enforce = next((bool(kwargs[j]) for j in kwargs if 'enforce' in j.lower()), None)
+        # Discards dates in the future for timeStamp, eventDate.
+        time_now = time_mt('dt')
+        timeStamp = min(dfRA.loc[0, 'fldTimeStamp'] if len(dfRA.index) else time_now, time_now)
+        eventDate = min(getEventDate(tblDate=dfData.loc[0, 'fldDate'] if len(dfData.index) else None,
+                                     defaultVal=timeStamp, **kwargs), timeStamp)
+        dfData.loc[0, 'fldDate'] = eventDate
+        dfRA.loc[0, 'fldTimeStamp'] = timeStamp
+        # No prob with this call on category.get(), TODO(cmt): -> as long as set_category=False to avoid recursion.
+        lastCategory = outerObj.category.get(mode='memory', set_category=False)
+
         # Aqui abajo, self accede al diccionario __permittedFrom de la clase de Animal correcta.
-        if categoryID and (categoryID in self.permittedFrom()[f"{lastCategory}"] or enforce):
-            outerObj.get_memory_data()['last_category'] = categoryID
+        enforce = next((bool(v) for k, v in kwargs.items() if 'enforce' in k.lower()), None)
+        # Flag to invoke PA creation method when conditions for this Activity change.
+        if categoryID and (categoryID in self.permittedDict()[lastCategory] or enforce):
+            # Situation here: category itself is NOT a ProgActivity (categories CANNOT be programmed). HOWEVER, a
+            # category change MAY trigger the creation of one or more ProgActivity records for outerObject.
+            # flagExecInstance flags just that.
+            flagExecInstance = (lastCategory != categoryID) if self.classSupportsPA() else False
 
-        return categoryID
+            # tblLink = next((j for j in args if j.tblName == self._tblLinkName), DataTable(self._tblLinkName))
+            dfLink = next((j for j in args if j.db.tbl_name == self._tblLinkName),
+                           pd.DataFrame.db.create(self._tblLinkName))
+            activityID = dfRA.loc[0, 'fldFK_NombreActividad'] if not dfRA.empty else None
+            activityID = activityID if activityID else self._activityID
+            dfRA.loc[0, 'fldFK_NombreActividad'] = activityID
+            dfData.loc[0, 'fldFK_Categoria'] = categoryID
+            idActividadRA = self._createActivityRA(dfRA, dfLink, dfData, **kwargs)
+            retValue = idActividadRA
+            if isinstance(retValue, int):
+                dfRA.loc[0, 'fldID'] = idActividadRA  # TODO: This value is passed back to paScheduler()
+                # Sets the proper castration value for _flagCastrado based on the category being set.
+                castration_date = self.outerObject.castration.get()
+                castration_date = (castration_date or 1) if categoryID in self.categ_castrated() else 0
+                # Here it only modifies _fldFlagCastrado in DB and the system. DOES NOT INSERT A NEW Castration Activity
+                # Can't use castration.set() here 'cause will produce an infinite recursion loop.
+                outerObj._fldFlagCastrado = castration_date
+                _ = setRecord(self.tblObjName(), fldID=self.outerObject.recordID,
+                              fldFlagCastrado=outerObj._fldFlagCastrado)
+
+                if self.supports_mem_data():
+                    memVal = self.get_mem_data()  # TODO: Do NOT use query_func=_getCategory here to avoid endless loop.
+                    if not memVal or memVal.get('fldDate', 0) < eventDate:
+                        # ('fldDate', 'fldFK_Actividad', 'fldFK_Categoria', 'fldDOB', 'fldMF')
+                        values = (eventDate, idActividadRA, categoryID, self.outerObject.dob, self.outerObject.mf)
+                        # vals = {k: v for k, v in dfData.iloc[0].to_dict().items() if k in
+                        #         self._mem_data_params['field_names']}
+                        vals = dict(zip(self._mem_data_params['field_names'], values))
+                        self.set_mem_data(vals)
+
+                # Verificar si hay hay que cerrar alguna(s) PA con con esta actividad como "cerradora".
+                # Minimum required at Activity level to drive the ProgActivity logic. The rest is done by paScheduler().
+                # This code is specific for the Activity (executeFields). idActividadRA just created and excluded_fields
+                # are also required to be passed on.
+                # if self._supportsPA:
+                #     executeFields = self.activityExecuteFields(execution_date=eventDate)
+                #     if execute_fields and isinstance(execute_fields, dict):
+                #         executeFields.update(execute_fields)  # execute_fields adicionales, si se pasan.
+                #     # Pretty contorted recursive dictionary to be able to pass data back to paScheduler() func.
+                #     kwargs['returned_params'].update({'idActividadRA': idActividadRA, 'execute_fields': executeFields,
+                #                                        'excluded_fields': excluded_fields})  # for paScheduler()
+
+                if flagExecInstance:
+                    # When conditions have changed, checks if the new conditions call for the creation of a new
+                    # ProgActivities on the object.
+                    self._paCreateExecInstance(outer_obj=self.outerObject)     # This one also goes to a queue.
+
+                # if self.doInventory(**kwargs):
+                #     _ = self.outerObject.inventory.set(tblRA, tblLink, date=max(timeStamp, eventDate))
+
+            else:
+                retValue = f'ERR_Sys_Object not valid or activity not defined: {retValue}- {callerFunction()}'
+                krnl_logger.info(retValue)
+                print(f'{moduleName()}({lineNum()} - {retValue}', dismiss_print=DISMISS_PRINT)
+
+        elif categoryID == lastCategory:
+            retValue = True   # -> True si no hay cambio de Categoria, porque no se genero idActividadRA.
+        else:
+            retValue = f'ERR_Sys_Category Problem - ID: {self.outerObject.ID}({self.outerObject.recordID}) ' \
+                       f'current Category: {lastCategory}; required Category:{categoryID}; ' \
+                       f'permittedDict[{lastCategory}]: {self.permittedDict()}'
+            krnl_logger.warning(f'{moduleName()}({lineNum()}  - {retValue}')
+            print(f'{moduleName()}({lineNum()}  - {retValue}', dismiss_print=DISMISS_PRINT)
+            retValue = False
+
+        return retValue
 
 
-
-        # # Prioridad eventDate:    1: fldDate(tblData); 2: kwargs(fecha valida); 3: timeStamp.
-        # timeStamp = time_mt('datetime')
-        # eventDate = getEventDate(tblDate=tblData.getVal(0, 'fldDate'), timeStamp=timeStamp, **kwargs)
-        # tblData.setVal(0, fldDate=eventDate)
-        # lastCategory = self.outerObject.category.get()  # No problem with this recursive call on category.
-        # # Aqui abajo, self accede al diccionario __permittedFrom de la clase de Animal correcta.
-        # if categoryID and (categoryID in self.permittedFrom()[f"{lastCategory}"] or enforce):
-        #     flagExecInstance = (lastCategory != categoryID)  # Flag to invoke PA creation method.
-        #     tblRA = next((j for j in args if j.tblName == self._tblRAName), DataTable(self._tblRAName))
-        #     tblLink = next((j for j in args if j.tblName == self._tblLinkName), DataTable(self._tblLinkName))
-        #     activityID = tblRA.getVal(0, 'fldFK_NombreActividad')
-        #     activityID = activityID if activityID else self._activityID
-        #     tblRA.setVal(0, fldFK_NombreActividad=activityID)
-        #     tblData.setVal(0, fldFK_Categoria=categoryID, fldComment='')
-        #
-        #     # if self.outerObject.supportsMemData:  # parametros para actualizar variables en memoria se pasan en
-        #     #     tblData.setVal(0, fldMemData=1)  # Activa flag Memory Data en el registro que se escribe en DB
-        #     idActividadRA = self._createActivityRA(tblRA, tblLink, tblData, **kwargs)
-        #     retValue = idActividadRA
-        #
-        #     if isinstance(retValue, int):
-        #         # """ En caso e reentry solo escribira en memoria el valor de eventDate mas alto disponible """
-        #         # with self.__lock:  # lock: the whole block must be atomic to ensure integrity of what's written to mem.
-        #         #     if self.outerObject.lastCategoryID:
-        #         #         if self.outerObject._lastCategoryID[1] < eventDate:
-        #         #             # Writes items to memory list only if data in memory is from a date EARLIER than eventDate.
-        #         #             self.outerObject.lastCategoryID = [categoryID, eventDate]
-        #         #     else:
-        #         #         self.outerObject.lastCategoryID = [categoryID, eventDate]  # Esta linea debiera ser atomica (Espero)
-        #
-        #         # Verificar si hay hay que cerrar alguna(s) PA con con esta actividad como "cerradora".
-        #
-        #         if self._supportsPA:
-        #             excluded_fields = set(excluded_fields) if isinstance(excluded_fields,
-        #                                                                  (list, set, tuple, dict)) else set()
-        #             # execute_date = self.outerObject._lastCategoryID[1]  # Gets the internal exec. date for lastCategory.
-        #             if isinstance(retValue, int) and self._supportsPA:
-        #                 executeFields = self._classExecuteFields(execution_date=eventDate,
-        #                                                          category=self.outerObject.lastCategoryID)
-        #                 if execute_fields and isinstance(execute_fields, dict):
-        #                     executeFields.update(execute_fields)  # execute_fields adicionales, si se pasan.
-        #                 self._paMatchAndClose(retValue, execute_fields=executeFields, excluded_fields=excluded_fields,
-        #                               **kwargs)  # TODO(cmt): This call is executed asynchronously by another thread
-        #
-        #                 # Updates cols in tblLink, so that external nodes can access Execute Data, Excluded Fields.
-        #                 fldID_Link = tblLink.getVal(0, 'fldID')
-        #                 if fldID_Link:
-        #                     setRecord(self._tblLinkName, fldID=fldID_Link, fldExecuteData=executeFields,
-        #                               fldExcludedFields=excluded_fields)
-        #
-        #                 print(f'\n_________This thread is: {threading.current_thread().name}____________ _'
-        #                       f'setCategory _matchAndClose. outerObject: {self.outerObject.ID}')
-        #
-        #         if flagExecInstance:
-        #             self._paCreateExecInstance(outer_obj=self.outerObject)     # This one also goes to a queue.
-        #     else:
-        #         retValue = f'ERR_Sys_Object not valid or activity not defined: {retValue}- {callerFunction()}'
-        #         krnl_logger.info(retValue)
-        #         print(f'{moduleName()}({lineNum()} - {retValue}', dismiss_print=DISMISS_PRINT)
-        #
-        # elif categoryID == lastCategory:
-        #     retValue = True   # -> True si no hay cambio de Categoria, porque no se genero idActividadRA.
-        # else:
-        #     retValue = f'ERR_Sys_ObjectNotValid or ActivityNotDefined - ID: {self.outerObject.ID} current Category:' \
-        #                f'{self.outerObject.lastCategoryID}; required Category:{categoryID}'
-        #     krnl_logger.warning(f'{moduleName()}({lineNum()}  - {retValue}')
-        #     print(f'{moduleName()}({lineNum()}  - {retValue}', dismiss_print=DISMISS_PRINT)
-        #
-        # return retValue
-
-    def _getCategory(self, sDate='', eDate='', *args, event_date=False, **kwargs):
+    def _getCategory(self, *args, mode='mem', id_type='id', uid=None, full_record=False, set_category=False,
+                     all_records=False, **kwargs):
         """
         Returns records in table Data Animales Categorias between sValue and eValue. sValue=eValue ='' ->Last record
         If the last update of the value (Category in this case) is less than 1 day old, returns value from memory.
-        @param sDate: No args: Last Record; sDate=eDate='': Last Record;
-                        sDate='0' or eDate='0': First Record
-                        Otherwise: records between sDate and eDate
-        @param eDate: See @param sDate.
+
         @param event_date: True -> returns the date lastCategoryID was set (_lastCategoryID[1])
+        @param uid: when passed, Animal uid to compute category based on age.
+        @param set_category: True:executes _setCategory() method to update category in db and memory_data. Default=False
+        @param all_records: returns full datataframe read from db.
         @param kwargs: mode='value' -> Returns value from DB.
                        id_type='name'-> Category Name; id_type='id' or no id_type -> Category ID.
-        @return: Object DataTable with information from queried table or statusID (int) if mode=val
+        @return: CategoryID (int) | CategoryName (str) | last Category record (DataFrame) | multiple records (DataFrame)
         """
-        categ = self.outerObject.category.compute()   # Always computes categ to get the one corresponding to time_mt()
-        return categ
+        fldName = 'fldFK_Categoria'
+        id_type = id_type or ''     # id_type=name returns categoryName, otherwise returns categoryID.
+        modeArg = mode or 'value'
+        latest_rec = None
+        # outerObject is an instance of Bovine, Caprine, etc., OR class Bovine, Caprine, etc.
+        outer_object = self.outerObject
+        # Todo(cmt): Tries memory data first. Reduces drastically db access. _getCategory() MUST support re-entry!!!
+        tmp = self.get_mem_data(query_func=self._getCategory, uid=uid)  # tmp is the full data record for uid.
+        query_df = None
+        if 'mem' in modeArg and isinstance(tmp, dict):
+            initial_cat = tmp.get(fldName)
+            computedCategory = self._compute(initial_category=initial_cat, uid=uid)
+            if initial_cat not in self.category_names():
+                krnl_logger.error(f'ERR_SYS: category is not valid!!: {initial_cat}.')
+                return None
+            if computedCategory == initial_cat:
+                if not full_record:
+                    return self.category_names()[initial_cat] if 'name' in id_type else initial_cat
+                return tmp      # Returns full data dictionary.
+        else:
+            query_df = self._get_link_records(uid=uid, **kwargs)
+            if not query_df.empty:
+                # TODO: FIX THE CASE OF EMPTY query_df.
+                # Assumes a dataframe with more than 1 record and pulls the record with latest fldDate.
+                latest_rec = query_df.loc[query_df['fldDate'] == query_df['fldDate'].max()].iloc[0]
+                initial_cat = latest_rec.loc[fldName] if not latest_rec.empty else None
+                # Checks against existing category and re-compute if they are different.
+                computedCategory = self._compute(initial_category=initial_cat, uid=uid)  # Computes without calling set()
+                latest_rec.fldFK_Categoria = computedCategory
+            else:
+                krnl_logger.error(f'ERR_ValueError: {uid} not present in {self._tblDataName}.')
+                return None
 
-        # fldName = 'fldFK_Categoria'
-        # modeArg = kwargs.get('mode') or 'mem'
-        # id_type = kwargs.get('id_type')
-        # retValue = None
-        # t = time_mt('datetime')
-        # # Todo esto para aprovechar los datos en memoria y evitar accesos a DB.
-        # outer_obj = self.outerObject
-        # # if outer_obj.supportsMemData and (not modeArg or 'mem' in modeArg.lower()) and \
-        # #         t - outer_obj._lastCategoryID[1] <= timedelta(minutes=15):
-        # #     # If data was pulled less than 15 minutes ago, returns memory data.
-        # #     if not id_type or 'id' in id_type.lower():  #  Returns data from memory (categoryID)
-        # #         retValue = outer_obj.lastCategoryID if not event_date else outer_obj._lastCategoryID[1]
-        # #     else:
-        # #         retValue = next((j for j in outer_obj.categories if outer_obj.categories[j] ==
-        # #                          outer_obj.lastCategoryID), None)   # Returns data from memory (categoryName)
-        # #     return retValue
-        #
-        # modeArg = 'value'
-        # tblRA = setupArgs(self._tblRAName, *args)  # __tblRAName viene de class Activity
-        # tblLink = setupArgs(self._tblLinkName, *args)  # __tblLinkName viene de class Activity
-        # tblData = setupArgs(self._tblDataName, *args, **kwargs)  # __tblDataName seteado INDIVIDUALMENTE.
-        # qryTable = self._getRecordsLinkTables(tblRA, tblLink, tblData)
-        # if isinstance(qryTable, DataTable):
-        #     if qryTable.dataLen <= 1:
-        #         result = qryTable
-        #     else:
-        #         result = qryTable.getIntervalRecords('fldDate', sDate, eDate, 1)  # mode=1: Date field.
-        #     if event_date is True:
-        #         return result.getVal(0, 'fldDate')
-        #
-        #     categID = result.getVal(0, fldName)
-        #     # outer_obj.lastCategoryID = [categID, t]     # Sets values in memory for compute() to work.
-        #     # categID = outer_obj.lastCategoryID      # Gets the latest category, after compute() updated it.
-        #     if 'val' in modeArg.lower():
-        #         # Retorna PRIMER o ULTIMO Registro en funcion de valores de sDate, eDate.
-        #         if not id_type or 'id' in id_type.lower():
-        #             retValue = categID
-        #         else:
-        #             retValue = next((j for j in outer_obj.categories if outer_obj.categories[j] ==
-        #                              categID), None)
-        #     else:
-        #         retValue = result   # Retorna DataTable con registros.
-        # return retValue
+        if initial_cat != computedCategory:
+            if set_category:
+                # Updates newly computed category to database and memory data when set_category=True.
+                dfRA, dfLink, dfData = self.set3frames(dfRA_name=self._tblRAName, dfLink_name=self._tblLinkName,
+                                                       dfData_name=self._tblDataName)
+                eventDate = time_mt('dt')
+                dfRA.loc[0, ('fldID', 'fldFK_NombreActividad')] = (None, self._activityID)  # fldID=None->force new rec
+                dfLink.loc[0, ('fldID', 'fldFK')] = (None, getattr(outer_object, 'ID', uid))
+                dfData.loc[0, ('fldID', 'fldFK_Categoria', 'fldDate', 'fldComment')] = \
+                               (None, computedCategory, eventDate, 'Category set from _getCategory().')
+                idActividadRA = self._createActivityRA(dfRA, dfLink, dfData, uid=uid, **kwargs)  # Sets new category.
+                if isinstance(idActividadRA, int):
+                    # Now, sets memory_data for category change.
+                    # mem_rec = self.get_mem_data(query_func=self._getCategory, uid=uid)  # Reads existing record first
+                    # if isinstance(mem_rec, dict):
+                    mem_rec = {fldName: computedCategory, 'fldFK_Actividad': idActividadRA, 'fldDate': eventDate}
+                    self.set_mem_data(mem_rec, uid=uid)
+                else:
+                    krnl_logger.error(f'ERR_DBAccess: could not update Animal Category in database. Computed '
+                                      f'category not saved.')
+        if all_records:
+            if query_df:
+                return query_df
+            else:
+                full_record = True
 
+        if full_record:
+            retValue = latest_rec.to_dict()   # Returns full dictionary of tblData fields.
+        elif 'name' in id_type.lower():
+            retValue = self.category_names()[computedCategory]       # Returns categoryName.
+        else:       # id_type set to anything other than 'name' results in returning categoryID.
+            retValue = computedCategory  # returns computed category if success or original category if call fails.
+        return retValue
 
-    # def _getCategory01(self, sDate='', eDate='', *args, event_date=False, **kwargs):
-    #     """
-    #     Returns records in table Data Animales Categorias between sValue and eValue. sValue=eValue ='' ->Last record
-    #     If the last update of the value (Category in this case) is less than 1 day old, returns value from memory.
-    #     @param sDate: No args: Last Record; sDate=eDate='': Last Record;
-    #                     sDate='0' or eDate='0': First Record
-    #                     Otherwise: records between sDate and eDate
-    #     @param eDate: See @param sDate.
-    #     @param event_date: True -> returns the date lastCategoryID was set (_lastCategoryID[1])
-    #     @param kwargs: mode='value' -> Returns value from DB.
-    #                    id_type='name'-> Category Name; id_type='id' or no id_type -> Category ID.
-    #     @return: Object DataTable with information from queried table or statusID (int) if mode=val
-    #     """
-    #     fldName = 'fldFK_Categoria'
-    #     modeArg = kwargs.get('mode') or 'mem'
-    #     id_type = kwargs.get('id_type')
-    #     retValue = None
-    #     t = time_mt('datetime')
-    #     # Todo esto para aprovechar los datos en memoria y evitar accesos a DB.
-    #     outer_obj = self.outerObject
-    #     # if outer_obj.supportsMemData and (not modeArg or 'mem' in modeArg.lower()) and \
-    #     #         t - outer_obj._lastCategoryID[1] <= timedelta(minutes=15):
-    #     #     # If data was pulled less than 15 minutes ago, returns memory data.
-    #     #     if not id_type or 'id' in id_type.lower():  #  Returns data from memory (categoryID)
-    #     #         retValue = outer_obj.lastCategoryID if not event_date else outer_obj._lastCategoryID[1]
-    #     #     else:
-    #     #         retValue = next((j for j in outer_obj.categories if outer_obj.categories[j] ==
-    #     #                          outer_obj.lastCategoryID), None)   # Returns data from memory (categoryName)
-    #     #     return retValue
-    #
-    #     modeArg = 'value'
-    #     tblRA = setupArgs(self._tblRAName, *args)  # __tblRAName viene de class Activity
-    #     tblLink = setupArgs(self._tblLinkName, *args)  # __tblLinkName viene de class Activity
-    #     tblData = setupArgs(self._tblDataName, *args, **kwargs)  # __tblDataName seteado INDIVIDUALMENTE.
-    #     qryTable = self._getRecordsLinkTables(tblRA, tblLink, tblData)
-    #     if isinstance(qryTable, DataTable):
-    #         if qryTable.dataLen <= 1:
-    #             result = qryTable
-    #         else:
-    #             result = qryTable.getIntervalRecords('fldDate', sDate, eDate, 1)  # mode=1: Date field.
-    #         if event_date is True:
-    #             return result.getVal(0, 'fldDate')
-    #
-    #         categID = result.getVal(0, fldName)
-    #         # outer_obj.lastCategoryID = [categID, t]     # Sets values in memory for compute() to work.
-    #         # categID = outer_obj.lastCategoryID      # Gets the latest category, after compute() updated it.
-    #         if 'val' in modeArg.lower():
-    #             # Retorna PRIMER o ULTIMO Registro en funcion de valores de sDate, eDate.
-    #             if not id_type or 'id' in id_type.lower():
-    #                 retValue = categID
-    #             else:
-    #                 retValue = next((j for j in outer_obj.categories if outer_obj.categories[j] ==
-    #                                  categID), None)
-    #         else:
-    #             retValue = result   # Retorna DataTable con registros.
-    #     return retValue
-    #
-
-
-
-    # def _getCategory00(self, sDate='', eDate='', *args, event_date=False, **kwargs):
-    #     """
-    #     Returns records in table Data Animales Categorias between sValue and eValue. sValue=eValue ='' ->Last record
-    #     @param sDate: No args: Last Record; sDate=eDate='': Last Record;
-    #                     sDate='0' or eDate='0': First Record
-    #                     Otherwise: records between sDate and eDate
-    #     @param eDate: See @param sDate.
-    #     @param kwargs: mode='value' -> Returns value from DB.
-    #                    id_type='name'-> Category Name; id_type='id' or no id_type -> Category ID. All from memory value.
-    #     @return: Object DataTable with information from queried table or statusID (int) if mode=val
-    #     """
-    #     fldName = 'fldFK_Categoria'
-    #     modeArg = kwargs.get('mode')
-    #     id_type = kwargs.get('id_type')
-    #     retValue = None
-    #
-    #     # Todo esto para aprovechar los datos en memoria y evitar accesos a DB.
-    #     if self.outerObject.supportsMemData and (not modeArg or 'mem' in modeArg.lower()):
-    #         if not id_type or 'id' in id_type.lower():  #  Returns data from memory (categoryID)
-    #             retValue = self.outerObject.lastCategoryID if not event_date else self.outerObject._lastCategoryID[1]
-    #         else:
-    #             retValue = next((j for j in self.outerObject.categories if self.outerObject.categories[j] ==
-    #                              self.outerObject.lastCategoryID), None)   # Returns data from memory (categoryName)
-    #         return retValue
-    #
-    #     modeArg = 'value'
-    #     tblRA = setupArgs(self._tblRAName, *args)  # __tblRAName viene de class Activity
-    #     tblLink = setupArgs(self._tblLinkName, *args)  # __tblLinkName viene de class Activity
-    #     tblData = setupArgs(self._tblDataName, *args, **kwargs)  # __tblDataName seteado INDIVIDUALMENTE.
-    #     qryTable = self._getRecordsLinkTables(tblRA, tblLink, tblData)
-    #     if isinstance(qryTable, DataTable):
-    #         if qryTable.dataLen <= 1:
-    #             result = qryTable
-    #         else:
-    #             result = qryTable.getIntervalRecords('fldDate', sDate, eDate, 1)  # mode=1: Date field.
-    #         if event_date is True:
-    #             return result.getVal(0, 'fldDate')
-    #
-    #         categID = result.getVal(0, fldName)
-    #         if 'val' in modeArg.lower():
-    #             # Retorna PRIMER o ULTIMO Registro en funcion de valores de sDate, eDate.
-    #             if not id_type or 'id' in id_type.lower():
-    #                 retValue = categID
-    #             else:
-    #                 retValue = next((j for j in self.outerObject.categories if self.outerObject.categories[j] ==
-    #                                  categID), None)
-    #         else:
-    #             retValue = result   # Retorna DataTable con registros.
-    #     return retValue
 
     @property
     def activityID(self):
@@ -493,141 +458,96 @@ class AnimalActivity(Activity):     # Abstract Class (no lleva ningun instance a
 
 
 
-
-
-
-    # @classmethod
-    # def processReplicated00(cls):  # Old version. ALL THIS IS ALREADY REPLACED BY Animales trigger AFTER INSERT.!!
-    #     """             ******  Run periodically as IntervalTimer func. ******
-    #                     ****** This code should (hopefully) execute in LESS than 5 msec (switchinterval).   ******
-    #     Used to execute logic for detection and management of INSERTed, UPDATEd and duplicate objects.
-    #     Defined for Animal, Tag, Person, Geo.
-    #     Checks for additions to tblAnimales from external sources (replication from other nodes) for Valid and
-    #     Active objects. Updates _fldID_list, _object_fldUPDATE_dict
-    #     @return: True if update operation succeeds, False if reading tblAnimales from db fails.
+    # def _getCategory00(self, sDate='', eDate='', *args, mode='mem', full_record=False, **kwargs):
     #     """
-    #     sql = f'SELECT * from "{cls.tblObjDBName()}" WHERE "Salida YN" == 0 OR "Salida YN" IS NULL; '
-    #     temp = dbRead(cls.tblObjName(), sql)
-    #     if not isinstance(temp, DataTable) or not temp:
-    #         return False
+    #     Returns records in table Data Animales Categorias between sValue and eValue. sValue=eValue ='' ->Last record
+    #     If the last update of the value (Category in this case) is less than 1 day old, returns value from memory.
+    #     @param sDate: No args: Last Record; sDate=eDate='': Last Record;
+    #                     sDate='0' or eDate='0': First Record
+    #                     Otherwise: records between sDate and eDate
+    #     @param eDate: See @param sDate.
+    #     @param event_date: True -> returns the date lastCategoryID was set (_lastCategoryID[1])
+    #     @param kwargs: mode='value' -> Returns value from DB.
+    #                    id_type='name'-> Category Name; id_type='id' or no id_type -> Category ID.
+    #     @return: Object DataTable with information from queried table or statusID (int) if mode=val
+    #     """
+    #     fldName = 'fldFK_Categoria'
+    #     id_type = kwargs.get('id_type') or None  # id_type=name returns categoryName, otherwise returns categoryID.
+    #     retValue = None
+    #     # Todo esto para aprovechar los datos en memoria y evitar accesos a DB.
+    #     outer_obj = self.outerObject  # This activity can be invoked by the Activity obj itself (no outerObject)
+    #     modeArg = mode
     #
-    #     # 1. INSERT -> Checks for INSERTED new Records verifying the status of the last-stored fldID col and locally
-    #     # added records then, process repeats/duplicates.
-    #     krnl_logger.info(f"---------------- INSIDE {cls.__class__.__name__}._processDuplicates()!! -------------------")
-    #     pulled_fldIDCol = temp.getCol('fldID')
-    #     newRecords = set(pulled_fldIDCol).difference(cls._fldID_list)
-    #     if newRecords:
-    #         newRecords = list(newRecords)
-    #         pulledIdentifiersCol = temp.getCol('fldTagNumber')  # List of lists. Each of the lists contains UIDs.
-    #         fullIdentifiers = []  # List of ALL identifiers from temp table, to check for repeat objects.
-    #         for lst in pulledIdentifiersCol:
-    #             if isinstance(lst, (list, tuple, set)):
-    #                 fullIdentifiers.extend(lst)
+    #     if 'mem' in modeArg:
+    #         # Todo(cmt): get_mem_data reduces drastically db access. _getCategory() MUST support re-entry!!!
+    #         tmp = self.get_mem_data(query_func=self._getCategory).get(fldName) if not full_record else \
+    #             self.get_mem_data(query_func=self._getCategory)
+    #         if isinstance(tmp, (int, dict)):
+    #             return tmp
+    #         else:
+    #             modeArg = 'value'
+    #
+    #     tblRA = setupArgs(self._tblRAName, *args)  # __tblRAName viene de class Activity
+    #     tblLink = setupArgs(self._tblLinkName, *args)  # __tblLinkName viene de class Activity
+    #     tblData = setupArgs(self._tblDataName, *args, **kwargs)  # __tblDataName seteado INDIVIDUALMENTE.
+    #     qryTable = self._getRecordsLinkTables(tblRA, tblLink, tblData)
+    #     if isinstance(qryTable, DataTable):
+    #         if qryTable.dataLen <= 1:
+    #             result = qryTable
+    #         else:
+    #             result = qryTable.getIntervalRecords('fldDate', sDate, eDate, 1)  # mode=1: Date field.
+    #         if full_record is True:
+    #             return result.unpackItem(0)
+    #
+    #         categID = result.getVal(0, fldName)
+    #         # Checks against existing category and re-compute if they are different.
+    #         computedCategory = outer_obj.category._compute(initial_category=categID) if outer_obj else \
+    #             self._compute(initial_category=categID)
+    #         if categID != computedCategory:
+    #             # Must update newly computed category to database and memory data.
+    #             tblRA.setVal(0, fldID=None)  # Clears fldID to force creation of a new record.
+    #             tblLink.setVal(0, fldID=None, fldFK=None)  # All other parameters should be OK in tables.
+    #             tblData.setVal(0, fldID=None, fldFK_Categoria=computedCategory,
+    #                            fldComment='Category set from get().')
+    #             tblRA.setVal(0, fldFK_NombreActividad=self._activityID)
+    #             idActividadRA = self._createActivityRA(tblRA, tblLink, tblData, **kwargs)  # Sets the new category.
+    #             if not isinstance(idActividadRA, int):
+    #                 krnl_logger.error(f'ERR_DBAccess: could not update Category tables in database.')
+    #                 return computedCategory  # Could not update database, returns computed category.
+    #             categID = computedCategory  # Updates to new computedCategory only on success, otherwise keeps old value
+    #
+    #         if 'val' in modeArg.lower():
+    #             if not id_type or 'id' in id_type.lower():
+    #                 retValue = categID  # returns computed category if success or original category if call fails.
     #             else:
-    #                 fullIdentifiers.append(lst)
-    #         fullIdentifiers = set(fullIdentifiers)
-    #         # TODO(cmt): here runs the logic for duplicates resolution for each of the uids in newRecords.
-    #         for j in newRecords:  # newRecords: ONLY records NOT found in _fldID_list from previous call.
-    #             # TODO: Pick the right cls (Bovine, Caprine, etc).
-    #             obj_dict = temp.unpackItem(pulled_fldIDCol.index(j))
-    #             objClass = Tag
-    #             obj = objClass(**obj_dict)
-    #
-    #             # If record is repeat (at least one of its identifiers is found in cls._identifiers), updates repeat
-    #             # records for databases that might have created repeats. Changes are propagated by the replicator.
-    #             identifs = obj.tagNumber  # getIdentifiers() returns set of identifiers UIDs.
-    #
-    #             """ Checks for duplicate/repeat objects: Must determine which one is the Original and set the record's
-    #             fldObjectUID field with the UUID of the Original object and fldExitDate to flag it's a duplicate.
-    #             """
-    #             # Note: the search for common identifiers and the logic of using timeStamp assures there is ALWAYS
-    #             # an Original object to fall back to, to ensure integrity of the database operations.
-    #             if fullIdentifiers.intersection(identifs):
-    #                 # TODO(cmt): Here detected duplicates: Assigns Original and duplicates based on myTimeStamp.
-    #                 for o in objClass.getRegisterDict().values():
-    #                     if o.tagNumber == identifs:
-    #                         if o.myTimeStamp <= obj.myTimeStamp:
-    #                             original = o
-    #                             duplicate = obj
-    #                         else:
-    #                             original = obj
-    #                             duplicate = o
-    #                         original.tagNumber = duplicate.tagNumber  # for data integrity.
-    #                         setRecord(cls.tblObjName(), fldID=duplicate.recordID, fldObjectUID=original.ID,
-    #                                   fldExitDate=time_mt('datetime'))
-    #                         setRecord(cls.tblObjName(), fldID=original.recordID, fldTagNumber=original.tagNumber)
-    #                         break
-    #             elif obj_dict.get('fldTerminal_ID') != TERMINAL_ID:
-    #                 # If record is not duplicate and comes from another node, adds it to __registerDict.
-    #                 obj.register()
-    #
-    #     # 2. UPDATE - Checks for UPDATED records modified in other nodes and replicated to this database. Checks are
-    #     # performed based on value of fldUPDATE field (a dictionary) in each record.
-    #     # The check for the node generating the UPDATE is done here in order to avoid unnecessary setting values twice.
-    #     # UPDATEDict = {temp.getVal(j, 'fldID'): temp.getVal(j, 'fldUPDATE') for j in range(temp.dataLen) if
-    #     #               temp.getVal(j, 'fldUPDATE')}  # Creates dict only with non-NULL (populated) items.
-    #     UPDATEDict = {}
-    #     for j in range(temp.dataLen):
-    #         if temp.getVal(j, 'fldUPDATE'):
-    #             d1 = temp.unpackItem(j)
-    #             UPDATEDict[d1['fldID']] = d1['fldUPDATE']
-    #     changed = {k: UPDATEDict[k] for k in UPDATEDict if k not in cls._object_fldUPDATE_dict or
-    #                (k in cls._object_fldUPDATE_dict and UPDATEDict[k] != cls._object_fldUPDATE_dict[k])}
-    #     if changed:  # changed = {fldID: fldUPDATE(int), }
-    #         for k in changed:  # updates all records in local database with records updated by other nodes.
-    #             # Update memory structures here: __registerDict, exitDate, etc, based on passed fldNames, values.
-    #             changedRecord = temp.unpackItem(fldID=k)
-    #             objClass = Tag
-    #             if objClass:
-    #                 obj = next((o for o in objClass.getRegisterDict().values() if o.recordID == k), None)
-    #                 if obj:
-    #                     # TODO(cmt): UPDATEs obj specific attributes with values from read db record.
-    #                     obj.updateAttributes(**changedRecord)
-    #                     if changedRecord.get('fldObjectUID', 0) != obj.ID:
-    #                         obj.setID(changedRecord['fldObjectUID'])
-    #                     if changedRecord.get('fldDateExit', 0) != obj.exitDate:
-    #                         obj.setExitDate(changedRecord['fldDateExit'])
-    #                         obj.isActive = False
-    #                         obj.unregister()
-    #             # Updates _object_fldUPDATE_dict (of the form {fldID: UUID(str), }) to latest values.
-    #             cls._object_fldUPDATE_dict[k] = changed[k]
-    #
-    #     # 3. BAJA / DELETE -> For DELETEd Records and records with fldExitDate !=0, removes object from __registerDict.
-    #     temp1 = getRecords(cls.tblObjName(), '', '', None, '*')
-    #     if not isinstance(temp, DataTable):
-    #         return False
-    #     # Removes from __registerDict Tag with fldExitDate (exit_recs) and DELETE (deleted_recs) executed in other nodes
-    #     all_recs = temp1.getCol('fldID')
-    #     exit_recs = set(all_recs).difference(pulled_fldIDCol)  # records with fldExitDate != 0.
-    #     remove_recs = exit_recs.difference(cls._fldID_exit_list)  # Compara con lista de exit Records ya procesados.
-    #     deleted_recs = set(cls._fldID_list).difference(pulled_fldIDCol)
-    #     remove_recs = remove_recs.union(deleted_recs) or []
-    #     for i in remove_recs:
-    #         obj = next((o for o in cls.getRegisterDict().values() if o.recordID == i), None)
-    #         if obj:
-    #             obj.unregister()
-    #
-    #     # Updates list of fldID and list of records with fldExitDate > 0 (Animales con Salida).
-    #     cls._fldID_list = pulled_fldIDCol.copy()  # [o.recordID for o in cls.getRegisterDict().values()]
-    #     cls._fldID_exit_list = exit_recs.copy()
-    #     return True
+    #                 # Returns categoryName.
+    #                 # retValue = next((j for j in outer_obj.categories if outer_obj.categories[j] == categID), None)
+    #                 retValue = next((j for j in self._activities_dict if self._activities_dict[j] == categID), None)
+    #         else:
+    #             retValue = result  # Retorna DataTable con registros. Support this for now. Later, we'll see...
+    #     return retValue
+
+
 
 # --------------------------------------------- Fin Class AnimalActivity --------------------------------------------- #
 
 
-# ========= GenericActivity Class used to... ========= #
+
+
+# TODO ========= GenericActivityAnimal NOT SUPPORTED FOR NOW WE'LL SEE LATER . ========= #
 class GenericActivityAnimal(AnimalActivity):                # GenericActivity Class for Animal.
     """
     Enables the creation of multiple AnimalActivity objects, sparing the creation of a full Activity Class when simple
     getter/setter functions are needed.
-    Data required to fully intialize an object: activityName, activityID, tblData and query field in the form
-    "tblName.fldName", and filter_fld_name. These 4 items read from [Animales Actividades Nombres] table.
-    Instance objects are created in Animal class as @property.
+    Data required to fully initialize an object: activityName, activityID, tblData, query field in the form
+    "tblName.fldName" and filter_fld_name. These 4 items are read from [Animales Actividades Nombres] table.
+    Instance objects are created in Animal class as a @property.
     ***** Additional external methods can be attached to individual objects via the register_method() method *****
     """
     __method_name = 'generic_activity'  # Defines __method_name to be included in Activity._activity_class_register
     # methods not to be deleted / unregistered.
-    __reserved_names = ('get', 'set', 'register_method', 'unregister_method','methods_wrapper','_createGenericActivityObjects')
+    __reserved_names = ('get', 'set', 'register_method', 'unregister_method', 'methods_wrapper',
+                        '_createGenericActivityObjects')
     __initialized = False
 
     def __new__(cls, activName, *args, **kwargs):  # Override para crear objeto nuevo solo si Activity no esta definida
@@ -637,7 +557,7 @@ class GenericActivityAnimal(AnimalActivity):                # GenericActivity Cl
             cls.__initialized = True                      # Flag para evitar re-inicializacion de la instancia.
             return cls.definedActivities()[activName]     # Retorna objeto Activity ya creado, si existe.
         else:
-            instance = super().__new__(cls)  # Crea objeto si el numero este dentro del limite de objs per thread
+            instance = super().__new__(cls)  # Crea objeto nuevo si el numero este dentro del limite de objs per thread
             cls.__initialized = False  # Flag para evitar re-inicializacion de la instancia.
             return instance
 
@@ -652,12 +572,30 @@ class GenericActivityAnimal(AnimalActivity):                # GenericActivity Cl
             self.__initialized = False      # Resetea flag de inicializacion para el proximo objeto que se vaya a crear.
             return                          # Evita re-inicializar si objeto existe desde antes.
 
-        self.__qryFldName = qry_fld_names   # Field Name to be queried for Activity in get() method. Only 1 field.
+        self.__qryFldName = qry_fld_names   # Field Name to be queried for Activity in get() method. 1 field only.
         self.__filterFldname = filter_field_name
         self.__oneShot = one_shot        # TODO(cmt): identify one-time only activities (weaning, castracion, etc).
         super().__init__(activName, *args, activity_enable=activityEnableFull, tbl_data_name=tbl_data_name,
                          excluded_fields=excluded_fields, decorator_name=decorator_name, **kwargs)
         self.definedActivities()[self._activityName] = self
+
+        # Now sets any existing Ad Hoc methods (their names listed in the db record) for the GenericActivity object.
+        methods_dict = next((v for k, v in kwargs.items() if 'adhoc_methods' in k.lower()), None)
+        if methods_dict and isinstance(methods_dict, dict):
+            # methods listed in AnimalesActividadesNombres.AdHoc_Methods field MUST be defined in GenericActivity class.
+            for k in methods_dict:
+                method = getattr(self, methods_dict[k], None)
+                if hasattr(method, '__self__'):
+                    method = method.__func__
+                if callable(method) or hasattr(method, '__func__'):
+                    if k in self.__reserved_names:
+                        # To "override" en existing method (defined in __reserved_names), implements a decorator call
+                        decorated = method(self, getattr(self, k).__func__)
+                        setattr(self, k, decorated)
+                    else:
+                        # If method is not in reserved_names, implements a regular call.
+                        # method passed to register_method() MUST be unbound.
+                        self.register_method(method_obj=method, method_name=k)
 
 
     @classmethod
@@ -672,6 +610,7 @@ class GenericActivityAnimal(AnimalActivity):                # GenericActivity Cl
                 obj = cls(k, decorator_name=cls._genericActivitiesDict[k][1],
                           tbl_data_name=cls._genericActivitiesDict[k][2], qry_fld_names=cls._genericActivitiesDict[k][3],
                           filter_field_name=cls._genericActivitiesDict[k][4] or 'fldDate',
+                          adhoc_methods=cls._genericActivitiesDict[k][5] or None,
                           one_shot=False, excluded_fields=(), **kwargs)
             except (TypeError, AttributeError, ValueError, NameError, SyntaxError):
                 pass
@@ -692,37 +631,38 @@ class GenericActivityAnimal(AnimalActivity):                # GenericActivity Cl
         tblLink = next((j for j in args if j.tblName == self._tblLinkName), DataTable(self._tblLinkName))
         tblData = next((j for j in args if j.tblName == self._tblDataName), DataTable(self._tblDataName, **kwargs))
 
-        # Support for "short" form: if no records in tblData, set ONLY the query_field in tblData.
+        # Support for "short" form: if no records are provided in tblData, sets ONLY the query_field in tblData.
         if not tblData.dataLen:
             if val and self.__qryFldName != '*':
                 tblData.setVal(0, **{self.__qryFldName: val})
             else:
-                return False
+                return False        # No data provided for all fields ('*') -> Exits with error, without writing to db.
 
         if self._isValid:  # and self.outerObject.validateActivity(self.__activityName):
-            timeStamp = time_mt('datetime')  # Prioridad: 1: fldDate(tblData); 2: kwargs(fecha valida); 3: timeStamp.
-            eventDate = getEventDate(tblDate=tblData.getVal(0, 'fldDate'), timeStamp=timeStamp, **kwargs)
+            # Priority: 1: fldDate(tblData); 2: kwargs(valid datetime, with key containing 'date'); 3: defaultVal.
+            defaultVal = val if self.__qryFldName == 'fldDate' and isinstance(val, datetime) else time_mt('dt')
+            eventDate = getEventDate(tblDate=tblData.getVal(0, 'fldDate'), defaultVal=defaultVal, **kwargs)
             tblRA.setVal(0, fldFK_NombreActividad=self._activityID)
             tblLink.setVal(0, fldFK=self.outerObject.ID)
-            tblData.setVal(0, fldDate=eventDate)  # Mismo valor para DB y para memoria.
-            if self.outerObject.supportsMemData:  # parametros para actualizar variables en memoria se pasan en
-                tblData.setVal(0, fldMemData=1)  # Activa flag Memory Data en el registro que se escribe en DB
+            tblData.setVal(0, fldDate=eventDate)
+            # if self.outerObject.supportsMemData:  # parametros para actualizar variables en memoria se pasan en
+            #     tblData.setVal(0, fldMemData=1)  # Activa flag Memory Data en el registro que se escribe en DB
             idActividadRA = self._createActivityRA(tblRA, tblLink, tblData, **kwargs)
             retValue = idActividadRA
 
             # TODO: Verificar si hay hay que cerrar alguna(s) PA con con esta actividad como closing Activity.
+            # if self._supportsPA:
             if self._supportsPA:
-                if self._supportsPA:
-                    executeFields = self._classExecuteFields(execution_date=tblData.getVal(0, 'fldDate'))
-                    if isinstance(execute_fields, dict):
-                        executeFields.update(execute_fields)      # execute_fields adicionales, si se pasan.
-                    self._paMatchAndClose(idActividadRA, execute_fields=executeFields, excluded_fields=excluded_fields,
-                                            force_close=pa_force_close)
-                    # Updates cols in tblLink, so that other nodes can access Execute Data, Excluded Fields.
-                    fldID_Link = tblLink.getVal(0, 'fldID')
-                    if fldID_Link:
-                        setRecord(self._tblLinkName, fldID=fldID_Link, fldExecuteData=executeFields,
-                                  fldExcludedFields=excluded_fields)
+                executeFields = self.activityExecuteFields(execution_date=tblData.getVal(0, 'fldDate'))
+                if isinstance(execute_fields, dict):
+                    executeFields.update(execute_fields)      # execute_fields adicionales, si se pasan.
+                self._paMatchAndClose(idActividadRA, execute_fields=executeFields, excluded_fields=excluded_fields,
+                                        force_close=pa_force_close)
+                # Updates cols in tblLink, so that other nodes can access Execute Data, Excluded Fields.
+                fldID_Link = tblLink.getVal(0, 'fldID')
+                if fldID_Link:
+                    setRecord(self._tblLinkName, fldID=fldID_Link, fldExecuteData=executeFields,
+                              fldExcludedFields=excluded_fields)
         else:
             retValue = f'ERR_Sys_ObjectNotValid or ActivityNotDefined - {callerFunction(getCallers=True)}'
             krnl_logger.info(retValue)
@@ -737,7 +677,6 @@ class GenericActivityAnimal(AnimalActivity):                # GenericActivity Cl
                         sDate='0' or eDate='0': First Record
                         Otherwise: records between sDate and eDate
         @param eDate: See @param sDate.
-
         @return: value or list of values corresponding to qryFldName.
         """
         args = set([j for j in args if isinstance(j, DataTable)])
@@ -748,7 +687,7 @@ class GenericActivityAnimal(AnimalActivity):                # GenericActivity Cl
         if self.__qryFldName not in tblData.fldNames + ['*', ]:
             self.__qryFldName = '*'         # chequeo basico de qryFldName. Si no es valido, setea a '*'.
         tblLink.setVal(0, fldFK=self.outerObject.ID, fldFK_Actividad=self._activityID)
-        qryTable = self._getRecordsLinkTables(tblRA, tblLink, tblData)
+        qryTable = self._getRecordsLinkTables(tblRA, tblLink, tblData, **kwargs)
         if isinstance(qryTable, DataTable):
             if qryTable.dataLen <= 1:
                 result = qryTable
@@ -765,11 +704,12 @@ class GenericActivityAnimal(AnimalActivity):                # GenericActivity Cl
                     retValue = result.getCol(self.__qryFldName)                            # List of values
         return retValue
 
+
     def getTblNames(self):
         """Returns _tblRAName, _tblLinkName, _tblDataName in that order """
         return self._tblRAName, self._tblLinkName, self._tblDataName
 
-    def register_method(self, method_obj=None):
+    def register_method(self, method_obj=None, *, method_name=None):
         """
         Registers method_obj (an external function) as a method in GenericActivity class. After registration, method_obj
         can be accessed by its name as a regular attribute of GenericActivity.
@@ -777,17 +717,25 @@ class GenericActivityAnimal(AnimalActivity):                # GenericActivity Cl
         Also IMPORTANT: if method_obj is already defined, any new call to register_method() with the same method_obj
         will OVERRIDE the existing attribute. This is by design to allow the implementation of updates to all registered
         attributes.
+        @param method_name: When provided, uses name to set the attribute. Needed for overriding already defined
+        methods (set, get).
         @param method_obj: callable (a function name)
         @return: True if registration successful. None if otherwise.
         """
         if not callable(method_obj):
             return None
-        setattr(self, method_obj.__name__, self.methods_wrapper(method_obj))  # sets decorated method as the callable.
+        if method_name and isinstance(method_name, str):
+            name = method_name
+        else:
+            name = method_obj.__name__
+        setattr(self, name, self.methods_wrapper(method_obj))  # sets decorated method as the callable.
         return True
+
 
     def methods_wrapper(self, func):
         """
         Used to pass self (a GenericActivity instance) to func so that self, self.outerObject are available to func.
+        This wrapper is designed mainly to incorporate in the class functions defined externally to GenericActivity.
         @param func: wrapped function.
         *** IMPORTANT: func MUST define self as its first positional argument. Ex: my_func(self, *args, **kwargs). ***
         """
@@ -803,18 +751,60 @@ class GenericActivityAnimal(AnimalActivity):                # GenericActivity Cl
         @return: None
         """
         if hasattr(self, method_name) and callable(getattr(self, method_name)):
-            if method_name.strip() in self.__reserved_names:
+            if method_name in self.__reserved_names:
                 return None             # ignores reserved method names
             delattr(self, method_name)
         return None
+
+
+    def _tact_set(self, func):
+        """ Ad hoc implementation of set() for Tact Activity. Uses a wrapper (decorator) function to implement the
+        override of functions already existing in GenericActivity class.
+        TODO: For now, these instance-specific functions go here for ease of implementation. Later, they can be placed
+        elsewhere and be passed to __init__() for the initialization of the respective objects.
+        """
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            if 'f' not in self.outerObject.mf:
+                return f'ERR_INP_Invalid object for tact Activity.'   # Since it's Tact, exits if Animal is not female.
+            ret = func(self, *args, **kwargs)
+            if isinstance(ret, int) and bool(kwargs.get('val')) and \
+                    'vaca' not in self.outerObject.category.get(id_type='name').lower():
+                # Updates Animal Category if tact result is positive and category for outerObject is not yet 'vaca'.
+                self.outerObject.category.set(category='vaca')
+            return ret
+        return wrapper
+
+# ---------------------------------------------- End Generic Activity ----------------------------------------------- #
+
+
 
 @singleton
 class InventoryActivityAnimal(AnimalActivity):
     __tblDataName = 'tblDataAnimalesActividadInventario'
     __activityName = 'Inventario'
     _short_name = 'invent'        # Used by Activity._paCreate(), Activity.__isClosingActivity()
+
+    @classmethod
+    def tblDataName(cls):
+        return cls.__tblDataName
+
+    @classmethod
+    def getActivityName(cls):
+        return cls.__activityName
+
     # TODO: __method_name could be read from DB. Already in [Actividades Nombres]. Does it make sense?
-    __method_name = 'inventory'  # Used in ActivityMethod to create the InventoryActivity object and the callable property.
+    __method_name = 'inventory'  # Used in ActivityMethod to create InventoryActivity object and the callable property.
+    # Params Used in default memory_data functions and class, in Activity.
+    _mem_data_params = {'field_names': ('fldDate', 'fldFK_Actividad', 'fldDaysToTimeout'), 'inventory': True}
+    # Local to InventoryActivity. Initialized in EntityObject. Must be dunder because class must be singled-out.
+    __local_active_uids_dict = {}    # {object_class: {uid: MemoryData object, }, }.
+    _slock_activity_mem_data = AccessSerializer()  # Used to manage concurrent access to memory, per-Activity basis.
+    __dict_updating = False          # Flag to manage concurrent access (by different threads) to local dictionary.
+
+    # def __call__(self, caller=None, *args, **kwargs):
+    #     self._caller = caller
+    #     return self
 
     def __init__(self, *args, **kwargs):
         kwargs['supportsPA'] = True     # Inventory does support PA.
@@ -823,11 +813,6 @@ class InventoryActivityAnimal(AnimalActivity):
         self.definedActivities()[self.__activityName] = self
         super().__init__(self.__activityName, *args, activity_enable=activityEnableFull,
                          tbl_data_name=self.__tblDataName, **kwargs)
-
-    # def __call__(self, caller_object, *args, **kwargs):
-    #     # print(f'>>>>>>>>>>>>>>>>>>>> {self} params - args: {(item_object, *args)}; kwargs: {kwargs}')
-    #     self.outerObject = caller_object  # item_object es instance de Animal, Tag, etc. NO PUEDE SER class
-    #     return self  # porque el 'self' de __call__ es un @property y no hace bind to classes
 
     def set(self, *args: DataTable, execute_fields=None, excluded_fields=(), **kwargs):
         """
@@ -843,42 +828,128 @@ class InventoryActivityAnimal(AnimalActivity):
         @return: 0->ID_Actividad (Registro De Actividades) if success; errorCode (str) on error; None for nonValid
         """
         # Must add tblLink if not passed, needed to update tblLink record with fldExecuteData, fldExcludedFields.
-        tblLink = next((j for j in args if isinstance(j, DataTable) and j.tblName == self._tblLinkName), None)
-        if tblLink is None:
-            args = list(args)
-            tblLink = DataTable(self._tblLinkName)
-            args.append(tblLink)
-        retValue = self._setInventory(*args, **kwargs)
+        dfRA = next((j for j in args if isinstance(j, pd.DataFrame) and j.db.tbl_name == self._tblRAName), None)
+        dfLink = next((j for j in args if isinstance(j, pd.DataFrame) and j.db.tbl_name == self._tblLinkName), None)
+        dfData = next((j for j in args if isinstance(j, pd.DataFrame) and j.db.tbl_name == self.tblDataName()), None)
+        args = list(args)
+        if dfRA is None:
+            dfRA = pd.DataFrame.db.create(self._tblRAName)
+            args.append(dfRA)
+        if dfLink is None:
+            dfLink = pd.DataFrame.db.create(self._tblLinkName)
+            args.append(dfLink)
+        if dfData is None:
+            dfData = pd.DataFrame.db.create(self.tblDataName())
+            args.append(dfData)
 
-        if isinstance(retValue, int) and self._supportsPA:
-            excluded_fields = set(excluded_fields) if isinstance(excluded_fields, (list, set, tuple, dict)) else set()
-            excluded_fields.update(self.getActivityExcludedFieldsClose(self.__activityName))
-            executeFields = self._classExecuteFields(execution_date=self.outerObject.inventory.get())
-            if execute_fields and isinstance(execute_fields, dict):
-                executeFields.update(execute_fields)  # execute_fields adicionales, si se pasan.
-            self._paMatchAndClose(retValue, execute_fields=executeFields, excluded_fields=excluded_fields)
-            # Updates cols in tblLink, so that external nodes can access Execute Data, Excluded Fields.
-            fldID_Link = tblLink.getVal(0, 'fldID')    # Uses fact that tblLink argument is updated by _setInventory().
-            if fldID_Link:
-                setRecord(self._tblLinkName, fldID=fldID_Link, fldExecuteData=executeFields,
-                          fldExcludedFields=excluded_fields)
+        retValue = self._setInventory(*args, execute_fields, excluded_fields, **kwargs)
 
-            # print(f'({lineNum()}) returning from _paMatchAndClose() in Inventory set(). outerAttr still at {self._outerAttr()}')
+        # if isinstance(retValue, int):
+        #     if self._supportsPA:
+        #         excluded_fields = set(excluded_fields) if isinstance(excluded_fields, (list, set, tuple, dict)) else set()
+        #         excluded_fields.update(self.getActivityExcludedFieldsClose(self.__activityName))
+        #         executeFields = self.activityExecuteFields(execution_date=self.outerObject.inventory.get())
+        #         if execute_fields and isinstance(execute_fields, dict):
+        #             executeFields.update(execute_fields)  # execute_fields adicionales, si se pasan.
+        #         self._paMatchAndClose(retValue, execute_fields=executeFields, excluded_fields=excluded_fields)
+        #         # Updates cols in tblLink, so that external nodes can access Execute Data, Excluded Fields.
+        #         fldID_Link = tblLink.getVal(0, 'fldID')    # Uses fact that tblLink data is updated by _setInventory().
+        #         if fldID_Link:
+        #             setRecord(self._tblLinkName, fldID=fldID_Link, fldExecuteData=executeFields,
+        #                       fldExcludedFields=excluded_fields)
 
         # TODO: For now, this one doesn't trigger creation of PA instances in tblLinkPA. We'll see later...
         return retValue
 
-    def get(self, sDate='', eDate='', *args, **kwargs):
+    def get(self, *args, mode='mem', full_record=False, uid=None, all_records=None, **kwargs):
         """
-        Returns ALL records in table Data Inventario between sValue and eValue. sValue=eValue ='' -> Last record
-        @param sDate: No args: Last Record; sDate=eDate='': Last Record;
-                        sDate='0' or eDate='0': First Record
-                        Otherwise: records between sDate and eDate
-        @param eDate: See @param sDate.
-        @param kwargs: mode='value' -> Returns last value from DB. If no mode or mode='memory' returns value from Memory.
-        @return: Object DataTable with information from queried table or statusID (int) if mode=val
+        Returns Inventory value (default), dictionary or DataFrame, based on parameter selection.
+        @param mode: str. memory | value: Pulls data from memory or from database.
+        @param uid: uid for which to run the query. If not passed, uses self.outerObject.
+        @param full_record: Returns a dictionary. Last database record, based on value of fldDate field.
+        @param all_records: Returns full pandas DataFrame with all rows pulled from the query.
+        @return: datetime | dict | DataFrame. None if no data found.
         """
-        return self._getInventory(sDate, eDate, *args, **kwargs)
+        return self._getInventory(*args, mode=mode, full_record=full_record, uid=uid, all_records=all_records, **kwargs)
+
+    def check_timeout(self, *, uid=None):     # TODO(cmt): Uses only memory data. Called by an InventoryActivity object.
+        """ Checks for object timeout
+        @return: True if time elapsed since last inventory exceeds object's days_to_timeout value.
+        """
+        return self._check_timeout(uid=uid)
+
+
+    @classmethod                        # InventoryActivity.
+    def _memory_data_init_last_rec(cls, obj_class, active_uids: set, *, max_col=None, **kwargs):
+        #                **** TODO(cmt): This function is designed to be run in its own thread! ****
+        """ Initializer for memory data that keeps LAST available database RECORD (last inventory, last status, etc.).
+        Overrides func in base class. Needed to be able to append fldDaysToTimeout data to inventory memory_data.
+        Called from EntityObject __init_subclass__(). cls._memory_data_classes are initialized at this call.
+        It reads all required data from database, creates MemoryData objects and initializes the local dictionary
+        cls.__local_active_uids_dict = {obj_class: {uid: MemoryData obj, }, }
+        Also copies the created dictionary to all parent classes that implement __local_active_uids_dict.
+        This is required to operate memory_data logic consistently and maintain data integrity.
+        Returns LAST values for fldNames passed (LAST meaning: db values associated with the last (highest) value of
+        fldDate field in the data table, or the LAST value corresponding to fldName if fldDate is not defined for
+        the table).
+        @param obj_class: class to be used as key for __local_active_uids_dict.
+        @return: None
+        """
+        uid_fld_name = "fldObjectUID"
+        tbl_obj_fld_names = ('fldObjectUID', 'fldDaysToTimeout')
+        tbl_obj = cls.tblObjName()
+        local_uids_dict = getattr(cls, '_' + cls.__name__ + '__local_active_uids_dict', None)
+        if local_uids_dict is not None:    # This is None for classes that don't support_mem_data(). If so, exits.
+            if not isinstance(max_col, str):
+                max_col = 'fldDate'  # Default column to pull max date.
+            if obj_class not in local_uids_dict:
+                local_uids_dict[obj_class] = pd.DataFrame([], columns=list(cls._mem_data_params['field_names']))
+
+            # Check if any cls has _animalClassID attribute defined (Bovine, Caprine, etc. will have it).
+            # Loads 1 dataframe at a time for: classes with _animalClassID == cls._animalClassID or for classes with
+            # _animalClassID not defined (AnimalActivity, TagActivity, DeviceActivity classes).
+            # not hasattr('_animalClassID') -> InventoryActivity, StatusActivity, etc. (not defined for specific
+            # animal classes.
+            if not hasattr(cls, '_animalClassID') or cls.animalClassID() == obj_class.animalClassID():
+                # fldDaysToTimeout belongs to a different table. Must be dealt with separately (down below...)
+                tblData_fields = getFldName(cls.tblDataName(), '*', mode=1)     # {fldName: dbFldName, }
+                flds = [f for f in cls._mem_data_params['field_names'] if f in tblData_fields]
+                # Now, get fldDaysToTimeout for active_uids.
+                uid_db_fld_name = getFldName(tbl_obj, uid_fld_name)
+                df_loaded = cls._load_memory_data_last_rec(tbl=cls.tblDataName(), keys=set(active_uids), flds=flds,
+                                                           max_col=max_col)
+                obj_fld_names_str = ", ".join([f'"{getFldName(tbl_obj, j)}"' for j in tbl_obj_fld_names])
+                sql_obj = 'SELECT ' + obj_fld_names_str + f' FROM "{getTblName(tbl_obj)}" WHERE "{uid_db_fld_name}" ' \
+                                                      f'IN {str(tuple(active_uids))}; '
+                df_obj = pd.read_sql_query(sql_obj, SQLiteQuery().conn)  # df_obj cols: (fldObjectUID, fldDaysToTimeout)
+                if df_obj.empty or df_loaded.empty:
+                    return
+
+                index = 'fldFK'  # Index to set on df_loaded.
+                df_loaded.set_index(index, inplace=True)  # df_loaded comes from tblLink, hence 'fldFK'
+                df_obj.set_index('fldObjectUID', inplace=True)  # df_obj comes from tblObject hence 'fldObjectUID'
+                joined = df_loaded.join(df_obj)
+                # Renames cols to use all names in _mem_data_params. Some names are changed by the sql_read decorator.
+                dfcols = joined.columns.tolist()
+                if any(cname not in cls._mem_data_params['field_names'] for cname in dfcols):
+                    if len(dfcols) != len(cls._mem_data_params['field_names']):
+                        raise AttributeError(f'ERR_Attribute: DataFrame in {cls.__name__} does not match Memory Data '
+                                             f'template. Aborting Memory Data initialization for Activity.')
+                    joined.rename(columns=dict(zip(joined.columns.to_list(), cls._mem_data_params['field_names'])),
+                                  inplace=True)
+
+                # Now resolves potential duplicate records in the dataframes picking the uids with the latest fldDate.
+                df_obj_class = local_uids_dict[obj_class]
+                if not df_obj_class.empty:
+                    merged = pd.merge(df_obj_class, joined, how='outer')
+                    # Keeps the record with highest fldDate (hopefully!)
+                    local_uids_dict[obj_class] = merged.groupby(index)[max_col].max()
+                else:
+                    local_uids_dict[obj_class] = joined
+                dicto = {"uid": local_uids_dict[obj_class].iloc[0].to_dict()}  # Printing Category mem_data.
+                print(f'MEMORY DATA for {cls.__name__}: {len(local_uids_dict[obj_class])} uid items. Item form: '
+                      f'{dicto}', dismiss_print=DISMISS_PRINT)
+        return
 
 
 @singleton
@@ -891,7 +962,28 @@ class StatusActivityAnimal(AnimalActivity):
     __activityName = 'Status'
     __method_name = 'status'
     _short_name = 'status'  # Used by Activity._paCreate(), Activity.__isClosingActivity()
-    def __new__(cls, *args, **kwargs):  # TODO(cmt): Right way to do singletons. Allows for isinstance, type checks.
+
+    @classmethod
+    def tblDataName(cls):
+        return cls.__tblDataName
+
+    @classmethod
+    def getActivityName(cls):
+        return cls.__activityName
+
+    _slock_activity_mem_data = AccessSerializer()  # Used to manage concurrent access to memory, per-Activity basis.
+    # Local to InventoryActivity. Initialized in EntityObject. Must be dunder because class must be single-out.
+
+    # __local_active_uids_dict used by Activity.__init_subclass__(): creates dict of classes that implement mem_data
+    __local_active_uids_dict = {}  # {uid: MemoryData object, }. Local to InventoryActivity. Initialized in EntityObject
+    _mem_data_params = {'field_names': ('fldFK_Status', 'fldDate', 'fldFK_Actividad')}
+
+    @classmethod
+    def get_local_uids_dict(cls):
+        return cls.__local_active_uids_dict
+
+
+    def __new__(cls, *args, **kwargs):  # TODO(cmt): Right way to do singletons. Allows for isinstance(), type checks.
         if not cls.__instance:
             cls.__instance = super().__new__(cls)  # Crea Objeto (solo si no existia)
         return cls.__instance  # Retorna objeto al llamador
@@ -923,44 +1015,52 @@ class StatusActivityAnimal(AnimalActivity):
                 'recordInventory'=True/False -> Overrides Activity setting of variable _isInventoryActivity
         @return: ID_Actividad (Registro De Actividades) if success; errorCode (str) on error; None for nonValid
         """
-        tblLink = next((j for j in args if isinstance(j, DataTable) and j.tblName == self._tblLinkName), None)
-        if tblLink is None:
-            args = list(args)
-            tblLink = DataTable(self.__tblLinkName)
-            args.append(tblLink)
+        dfRA = next((j for j in args if isinstance(j, pd.DataFrame) and j.db.tbl_name == self._tblRAName), None)
+        dfLink = next((j for j in args if isinstance(j, pd.DataFrame) and j.db.tbl_name == self._tblLinkName), None)
+        dfData = next((j for j in args if isinstance(j, pd.DataFrame) and j.db.tbl_name == self.tblDataName()), None)
+        args = list(args)
+        if dfRA is None:
+            dfRA = pd.DataFrame.db.create(self._tblRAName)
+            args.append(dfRA)
+        if dfLink is None:
+            dfLink = pd.DataFrame.db.create(self._tblLinkName)
+            args.append(dfLink)
+        if dfData is None:
+            dfData = pd.DataFrame.db.create(self.tblDataName())
+            args.append(dfData)
+
         retValue = self._setStatus(*args, status=status, **kwargs)
-        if isinstance(retValue, int):
-            if self._doInventory(**kwargs):
-                _ = self.outerObject.inventory.set()
-            if self._supportsPA:
-                excluded_fields = set(excluded_fields) if isinstance(excluded_fields, (list, set, tuple, dict)) else set()
-                execute_date = self.outerObject._lastStatus[1]  # Gets the internal execution date for lastInventory.
-                if isinstance(retValue, int) and self._supportsPA:
-                    executeFields = self._classExecuteFields(execution_date=execute_date,
-                                                             status=self.outerObject.lastStatus)
-                    if execute_fields and isinstance(execute_fields, dict):
-                        executeFields.update(execute_fields)  # execute_fields adicionales, si se pasan.
-                    self._paMatchAndClose(retValue, execute_fields=executeFields, excluded_fields=excluded_fields,
-                                          **kwargs)  # TODO(cmt): This call is executed asynchronously by another thread
-                    # Updates cols in tblLink, so that external nodes can access Execute Data, Excluded Fields.
-                    fldID_Link = tblLink.getVal(0, 'fldID')  # tblLink argument is updated by _setStatus().
-                    if fldID_Link:
-                        setRecord(self._tblLinkName, fldID=fldID_Link, fldExecuteData=executeFields,
-                                  fldExcludedFields=excluded_fields)
+
+
+        # if isinstance(retValue, int):        # it don't make any sense to program status changes (at least for now)
+        #     if self._supportsPA:
+        #         excluded_fields = set(excluded_fields) if isinstance(excluded_fields, (list, set, tuple, dict)) else set()
+        #         execute_date = self.outerObject._lastStatus[1]  # Gets the internal execution date for lastInventory.
+        #         if isinstance(retValue, int) and self._supportsPA:
+        #             executeFields = self.activityExecuteFields(execution_date=execute_date,
+        #                                                      status=self.outerObject.lastStatus)
+        #             if execute_fields and isinstance(execute_fields, dict):
+        #                 executeFields.update(execute_fields)  # execute_fields adicionales, si se pasan.
+        #             self._paMatchAndClose(retValue, execute_fields=executeFields, excluded_fields=excluded_fields,
+        #                                   **kwargs)  # TODO(cmt): This call is executed asynchronously by another thread
+        #             # Updates record in tblLink, so that external nodes can access Execute Data, Excluded Fields.
+        #             fldID_Link = tblLink.getVal(0, 'fldID')  # tblLink argument is updated by _setStatus().
+        #             if fldID_Link:
+        #                 setRecord(self._tblLinkName, fldID=fldID_Link, fldExecuteData=executeFields,
+        #                           fldExcludedFields=excluded_fields)
         return retValue
 
 
-    def get(self, sDate='', eDate='', *args, **kwargs):
+    def get(self, *args, mode='mem', full_record=False, uid=None, all_records=None, **kwargs):
         """
-        Returns records in table Data Status between sValue and eValue. If sValue = eValue = '' -> Last record
-        @param sDate: No args: Last Record; sDate=eDate='': Last Record;
-                        sDate='0' or eDate='0': First Record
-                        Otherwise: records between sDate and eDate
-        @param eDate: See @param sDate.
-        @param kwargs: mode=val -> Returns val only from DB. If no mode, returns value from Memory.
-        @return: Object DataTable with information from queried table or statusID (int) if mode=val
+        Returns Status value (default), dictionary or DataFrame, based on parameter selection.
+        @param mode: str. memory | value: Pulls data from memory or from database.
+        @param uid: uid for which to run the query. If not passed, uses self.outerObject.
+        @param full_record: Returns a dictionary. Last database record, based on value of fldDate field.
+        @param all_records: Returns full pandas DataFrame with all rows pulled from the query.
+        @return: datetime | dict | DataFrame. None if no data found.
         """
-        return self._getStatus(sDate, eDate, *args, **kwargs)
+        return self._getStatus(*args, mode=mode, full_record=full_record, uid=uid, all_records=all_records, **kwargs)
 
 
     def comp(self, val):
@@ -977,6 +1077,20 @@ class LocalizationActivityAnimal(AnimalActivity):
     __method_name = 'localization'
     _short_name = 'locali'  # Used by Activity._paCreate(), Activity.__isClosingActivity()
 
+    @classmethod
+    def tblDataName(cls):
+        return cls.__tblDataName
+
+    @classmethod
+    def getActivityName(cls):
+        return cls.__activityName
+
+    # __local_active_uids_dict used by Activity.__init_subclass__(): creates dict of classes that implement mem_data
+    # __local_active_uids_dict to return _support_mem_data status (True/False)
+    __local_active_uids_dict = {}  # pd.DataFrame. Local to InventoryActivity. Initialized in EntityObject
+    _mem_data_params = {'field_names': ('fldFK_Localizacion', 'fldDate', 'fldFK_Actividad')}
+    _slock_activity_mem_data = AccessSerializer()  # Used to manage concurrent access to memory, per-Activity basis.
+
 
     def __init__(self, *args, **kwargs):
         # Registers activity_name to prevent re-instantiation in GenericActivity.
@@ -986,37 +1100,48 @@ class LocalizationActivityAnimal(AnimalActivity):
         super().__init__(self.__activityName, *args, tbl_data_name=self.__tblDataName, **kwargs)
 
 
-    def set(self, *args: DataTable, localization: Geo = None, **kwargs):      # TODO: CORREGIR ESTE METODO, usando objetos Geo
+    def set(self, *args: DataTable, localization: Geo = None, execute_fields=None, excluded_fields=None, **kwargs):
         """
         Inserts LocalizationActivityAnimal obj_data for the object "obj" in the DB.
         __outerAttr: TagObject para la que se realiza la Actividad. Lo setea el metodo inventario().
-        @param localization: Geo object to set LocalizationActivity in short form (without passing full DataTables)
-        @param date: Event Date (str)
+        @param localization: Geo object to set LocalizationActivity in short form (without passing full DataFrames)
         @param args: list of DataTable objects, with all the tables and fields to be written to DB.
                 No checks performed. The function doing the write will discard and ignore all non valid arguments
         @param kwargs: recordInventory: 0->Do NOT call _setInventory() / 1: Call _setInventory(),
                         idLocalization = valid LocalizationActivityAnimal val, from table GeoEntidades
         @return: 0->ID_Actividad (Registro De Actividades) if success; errorCode (str) on error; None for nonValid
         """
+        dfRA = next((j for j in args if isinstance(j, pd.DataFrame) and j.db.tbl_name == self._tblRAName), None)
+        dfLink = next((j for j in args if isinstance(j, pd.DataFrame) and j.db.tbl_name == self._tblLinkName), None)
+        dfData = next((j for j in args if isinstance(j, pd.DataFrame) and j.db.tbl_name == self.tblDataName()), None)
+        args = list(args)
+        if dfRA is None:
+            dfRA = pd.DataFrame.db.create(self._tblRAName)
+            args.append(dfRA)
+        if dfLink is None:
+            dfLink = pd.DataFrame.db.create(self._tblLinkName)
+            args.append(dfLink)
+        if dfData is None:
+            dfData = pd.DataFrame.db.create(self.tblDataName())
+            args.append(dfData)
+
         kwargs['localization'] = localization
-        retValue = self._setLocalization(*args, **kwargs)
-        if not isinstance(retValue, str):
-            if self._doInventory(**kwargs):
-                _ = self.outerObject.inventory.set()
+        retValue = self._setLocalization(*args, execute_fields, excluded_fields, **kwargs)
+
         return retValue
 
-    def get(self, sDate='', eDate='', *args, **kwargs):
+    def get(self, *args, mode='mem', full_record=False, uid=None, all_records=None, **kwargs):
         """
-       Returns records in table Data LocalizationActivityAnimal between sValue and eValue.
-       If sValue = eValue = '' -> Last record
-       @param sDate: No args: Last Record; sDate=eDate='': Last Record;
-                       sDate='0' or eDate='0': First Record
-                       Otherwise: records between sDate and eDate
-       @param eDate: See @param sDate.
-       @param kwargs: mode='value' -> Returns value from DB. If no mode or mode='memory' returns value from Memory.
-        @return: Object DataTable with information from queried table or statusID (int) if mode=val
+       Returns records in table Data LocalizationActivityAnimal.
+       Returns last Localization value (default), dictionary or DataFrame, based on parameter selection.
+        @param mode: str. memory | value: Pulls data from memory or from database.
+        @param uid: uid for which to run the query. If not passed, uses self.outerObject.
+        @param full_record: Returns a dictionary. Last database record, based on value of fldDate field.
+        @param all_records: Returns full pandas DataFrame with all rows pulled from the query.
+        @return: last Localization | dict | DataFrame. None if no data is found.
         """
-        retValue = self._getLocalization(sDate, eDate, *args, **kwargs)
+        retValue = self._getLocalization(*args, mode=mode, full_record=full_record, uid=uid, all_records=all_records,
+                                         **kwargs)
         return retValue
 
     def comp(self, val):
@@ -1036,6 +1161,10 @@ class CastrationActivityAnimal(AnimalActivity):
     _short_name = 'castra'  # Activity short name. 6 chars. Used by Activity._paCreate(), Activity.__isClosingActivity()
     __one_time_activity = True
 
+    @classmethod
+    def tblDataName(cls):
+        return cls.__tblDataName
+
     def __init__(self, *args, **kwargs):
         # Registers activity_name to prevent re-instantiation in GenericActivity.
         self.definedActivities()[self.__activityName] = self
@@ -1046,40 +1175,64 @@ class CastrationActivityAnimal(AnimalActivity):
         super().__init__(self.__activityName, *args, tbl_data_name=self.__tblDataName, **kwargs)
 
 
-    def set(self, *args, event_date=0):
+    def set(self, *args, date=None):
         """
         Sets castration date for Animal. Updates tables: Animales, Animales Registro De Actividades,
         Link Animales Actividades, Data Animales Castracion
-        @param event_date: datetime or  0, False, None or '' -> Castration = NO
-                                      Valid Date -> Castration = YES with Date / 1 -> Castration = YES without Date.
-        @return: flagCastrado (datetime, int) or ERR_ (string)
+        @param date: datetime. 0, False, None or '' -> Date not known (However castration is recorded as done).
+        @return: flagCastrado (int) or ERR_ (string)
         """
-        # Si es 0, False, None: _fldFlagCastrado = 0 (No castrado)
-        # Fecha valida -> _fldFlagCastrado=datetime obj. En cualquier otro caso: 1 -> Castrado,pero no se conoce Fecha
-        if self.outerObject.isCastrated:
-            return self.outerObject.isCastrated
-        elif event_date and not isinstance(event_date, datetime):
-            # Si ya esta castrado o si no es fecha valida y no es cero/None, sale sin setear nada.
-            return f'ERR_INP_Invalid Argument(s) castration: {event_date}'
+        dfRA, dfLink, dfData = self.set3frames(*args, dfRA_name=self._tblRAName, dfLink_name=self._tblLinkName,
+                                               dfData_name=self.tblDataName(), default=None)
+        args = list(args)
+        if dfRA is None:
+            dfRA = pd.DataFrame.db.create(self._tblRAName)
+            args.append(dfRA)
+        if dfLink is None:
+            dfLink = pd.DataFrame.db.create(self._tblLinkName)
+            args.append(dfLink)
+        if dfData is None:
+            dfData = pd.DataFrame.db.create(self.tblDataName())
+            args.append(dfData)
+        eventDate = date
+        time_now = time_mt('dt')
+        if eventDate:
+            if not isinstance(eventDate, (int, float)):
+                # Discards dates in the future for executed activities (ProgActivities are another class Activity objs.)
+                eventDate = min(date.timestamp() if isinstance(eventDate, datetime) else 1, time_now)
+        else:
+            eventDate = None        # Castration date not passed. Still Castration is recorded as done.
 
-        with self.__lock:
-            self.outerObject.isCastrated = event_date        # variable local, para aceptar re-entry.
-        tblObjects = DataTable(self.__tblObjectsName)
-        tblObjects.setVal(0,fldFlagCastrado=self.outerObject.isCastrated, fldFK_UserID=sessionActiveUser, fldID=self.ID)
-        _ = setRecord(tblObjects.tblName, **tblObjects.unpackItem(0))  # Setea _flagCastrado en tblAnimales
-        tblRA = DataTable(self._tblRAName, *args)
-        tblLink = DataTable(self._tblLinkName, *args)
-        tblData = DataTable(self.__tblDataName, *args, fldDate=self.outerObject.isCastrated)
+        outer_obj = self.outerObject
+        outer_obj.isCastrated = True        # TODO(cmt): eventDate es variable local, para aceptar re-entry.
+        dfObjects = pd.DataFrame.db.create(self.tblObjName())
+        dfObjects.loc[0, ('fldFlagCastrado', 'fldFK_UserID', 'fldID')] = (1, sessionActiveUser, outer_obj.recordID)
+        _ = setRecord(dfObjects.db.tbl_name, **dfObjects.iloc[0].to_dict())  # Setea _flagCastrado en tblAnimales
+
+        dfData.loc[0, ('fldDate', 'fldFlagCastrado')] = (eventDate, 1)
         activityID = AnimalActivity.getActivitiesDict().get(self.__activityName)
-        tblRA.setVal(0, fldFK_NombreActividad=activityID)
-        _ = self._createActivityRA(tblRA, tblLink, tblData)
+        timeStamp = min(dfRA.loc[0, 'fldTimeStamp'] if not dfRA.empty else time_now, time_now)
+        dfRA.loc[0, ('fldFK_NombreActividad', 'fldTimeStamp')] = (activityID, timeStamp)
+        _ = self._createActivityRA(dfRA, dfLink, dfData)
         if isinstance(_, str):
-            krnl_logger.error(f'ERR_DBAccess. Cannot read from tbl {tblData.tblName}. Error: {_}')
+            krnl_logger.error(f'ERR_DBAccess. Cannot read from tbl {dfData.db.tbl_name}. Error: {_}')
             return _
-        return self.outerObject._flagCastrado
+
+        # Sets new category based on castration and animal age.
+        if outer_obj.age.get() <= self.outerObject._myActivityClass.ageLimit('novillito'):
+            outer_obj.category.set(category='novillito')
+        else:
+            outer_obj.category.set(category='novillo')
+
+        # if self.doInventory():
+        #     _ = self.outerObject.inventory.set(tblRA, tblLink, date=max(timeStamp.timestamp(), eventDate))
+
+        return outer_obj._fldFlagCastrado
+
+
 
     def get(self):
-        return self.outerObject._flagCastrado
+        return self.outerObject._fldFlagCastrado
 
 
 @singleton
@@ -1091,7 +1244,14 @@ class AgeActivityAnimal(AnimalActivity):
     __activityName = 'Edad'
     __method_name = 'age'
     _short_name = 'age'  # Used by Activity._paCreate(), Activity.__isClosingActivity()
-    # __operators = {'lt': lt, 'le': le, 'gt': gt, 'ge': ge}      # TODO: For later implementation
+
+    @classmethod
+    def tblDataName(cls):
+        return cls.__tblDataName
+
+    @classmethod
+    def getActivityName(cls):
+        return cls.__activityName
 
     def __init__(self, *args, **kwargs):
         # Registers activity_name to prevent re-instantiation in GenericActivity.
@@ -1125,6 +1285,14 @@ class MeasurementActivityAnimal(AnimalActivity):
     __method_name = 'measurement'
     _short_name = 'measur'     # Used by Activity._paCreate(), Activity.__isClosingActivity()
 
+    @classmethod
+    def tblDataName(cls):
+        return cls.__tblDataName
+
+    @classmethod
+    def getActivityName(cls):
+        return cls.__activityName
+
     temp = getRecords('tblAnimalesMedicionesNombres', '', '', None, '*')
     if not isinstance(temp, DataTable):
         raise (DBAccessError, 'ERR_DBAccess: cannot read table [Animales Mediciones Nombres]. Exiting.')
@@ -1146,8 +1314,10 @@ class MeasurementActivityAnimal(AnimalActivity):
         self.__tblLink = setupArgs(self._tblLinkName, *args)
         self.__tblData = setupArgs(self.__tblDataName, *args, **kwargs)
 
-    def set(self, *args: DataTable, meas_name: str = '', meas_value=None, meas_units: str = '', excluded_fields=None,
-            execute_fields=None, **kwargs):
+
+    # @Activity.activity_tasks(after=(Activity.doInventory, Activity.paScheduler))
+    def set(self, *args: pd.DataFrame, meas_name: str = '', meas_value=None, meas_units: str = '', excluded_fields=None,
+            execute_fields=None, **kwargs):         # execute_fields passed directly to decorator @activity_tasks()
         """
         Creates a record in [Data Animales Actividad Mediciones]. Creates records in [Animales Registro De Actividades]
         and [Link Animales Actividades] if required.
@@ -1160,24 +1330,22 @@ class MeasurementActivityAnimal(AnimalActivity):
         """
         meas_name = meas_name.lower() if isinstance(meas_name, str) else ''
         meas_units = meas_units.lower() if isinstance(meas_units, str) else ''
+        dfRA, dfLink, dfData = self.set3frames(*args, dfRA_name=self._tblRAName, dfLink_name=self._tblLinkName,
+                                               dfData_name=self.tblDataName(), default='dataframe')
+        args = list(args)
+        args.append(dfRA)
+        args.append(dfLink)
+        args.append(dfData)
 
-        tblRA = next((j for j in args if isinstance(j, DataTable) and j.tblName == self._tblRAName),
-                       DataTable(self._tblRAName))
-        # Must add tblLink if not passed, needed to update tblLink record with fldExecuteData, fldExcludedFields.
-        tblLink = next((j for j in args if isinstance(j, DataTable) and j.tblName == self._tblLinkName),
-                       DataTable(self._tblLinkName))
-        tblData = next((j for j in args if isinstance(j, DataTable) and j.tblName == self.__tblDataName),
-                       DataTable(self.__tblDataName, **kwargs))
-        m_id = tblData.getVal(0, 'fldFK_NombreMedicion') if tblData.dataLen else \
-            self._measurementsDict_lower.get(meas_name)
+        m_id = dfData.loc[0, 'fldFK_NombreMedicion'] if not dfData.empty else self._measurementsDict_lower.get(meas_name)
         try:
-            m_unit_id = tblData.getVal(0, 'fldFK_Unidad') if tblData.dataLen else \
+            m_unit_id = dfData.loc[0, 'fldFK_Unidad'] if not dfData.empty else \
                 (self._unitsDict_lower.get(meas_units)[0] if meas_units in self._unitsDict_lower else
                  next((self._unitsDict_lower.get(k)[0] for k in self._unitsDict_lower if meas_units in
                        self._unitsDict_lower.get(k)[1]), None))
         except IndexError:
             m_unit_id = None
-        m_value = tblData.getVal(0, 'fldValue') if tblData.dataLen else meas_value
+        m_value = dfData.loc[0, 'fldValue'] if not dfData.empty else meas_value
         if m_unit_id not in [j[0] for j in list(self._unitsDict.values())]:
             return f'ERR_INP_Argument(s): Invalid or missing units {meas_units}.'
         if m_id not in self._measurementsDict.values():
@@ -1185,35 +1353,42 @@ class MeasurementActivityAnimal(AnimalActivity):
         if m_value is None or m_value == VOID:          # 0, '' are valid measurement values.
             return f'ERR_INP_Argument(s): Measurement value missing.'
 
-        if not tblData.dataLen:
-            tblData.setVal(0, fldFK_NombreMedicion=m_id,  fldValue=m_value, fldFK_Unidad=m_unit_id)
-        tblRA.setVal(0, fldFK_NombreActividad=self._activityID)
-        tblLink.setVal(0, fldExcludedFields=excluded_fields)
-        retValue = self._createActivityRA(tblRA, tblLink, tblData)
+        if dfData.empty:
+            dfData.loc[0, ('fldFK_NombreMedicion',  'fldValue', 'fldFK_Unidad')] = (m_id, m_value, m_unit_id)
+        dfRA.loc[0, 'fldFK_NombreActividad'] = self._activityID
+        dfLink.loc[0, 'fldExcludedFields'] = excluded_fields
+        retValue = self._createActivityRA(dfRA, dfLink, dfData)
         if isinstance(retValue, str):
-            krnl_logger.error(f'ERR_DBAccess. Cannot read from tbl {tblData.tblName}. Error: {retValue}')
+            krnl_logger.error(f'ERR_DBAccess. Cannot read from tbl {dfData.db.tbl_name}. Error: {retValue}')
             return retValue
 
-        if self._supportsPA:
-            excluded_fields = set(excluded_fields) if isinstance(excluded_fields, (list, set, tuple, dict)) else set()
-            excluded_fields.update(self.getActivityExcludedFieldsClose(self._activityName))
-            executeFields = self._classExecuteFields(execution_date=tblData.getVal(0, 'fldDate'),
-                                                     fldFK_NombreMedicion=m_id)
-            if execute_fields and isinstance(execute_fields, dict):
-                executeFields.update(execute_fields)  # execute_fields adicionales, si se pasan.
-            self._paMatchAndClose(retValue, execute_fields=executeFields, excluded_fields=excluded_fields)
-            # Updates fldExecuteData, fldExcludedFields in tblLink so that this data is replicated to other nodes.
-            fldID_Link = tblLink.getVal(0, 'fldID')  # Uses fact that tblLink arg. is updated by _createActivityRA().
-            if fldID_Link:
-                setRecord(self._tblLinkName, fldID=fldID_Link, fldExecuteData=executeFields,
-                          fldExcludedFields=excluded_fields)
-        if self._doInventory(**kwargs):
-            _ = self.outerObject.inventory.set()
+        # Updates kwargs for paScheduler() execution.
+        dfData.loc[0, 'fldFK_NombreMedicion'] = m_id
+        dfRA.loc[0, 'fldID'] = retValue
+        kwargs.update({'idActividadRA': retValue, 'm_id': m_id})
+
+
+        # if self._supportsPA:
+        #     excluded_fields = set(excluded_fields) if isinstance(excluded_fields, (list, set, tuple, dict)) else set()
+        #     excluded_fields.update(self.getActivityExcludedFieldsClose(self._activityName))
+        #     executeFields = self.activityExecuteFields(execution_date=tblData.getVal(0, 'fldDate'),
+        #                                              fldFK_NombreMedicion=m_id)
+        #     if execute_fields and isinstance(execute_fields, dict):
+        #         executeFields.update(execute_fields)  # execute_fields adicionales, si se pasan.
+        #     self._paMatchAndClose(retValue, execute_fields=executeFields, excluded_fields=excluded_fields)
+        #     # Updates fldExecuteData, fldExcludedFields in tblLink so that this data is replicated to other nodes.
+        #     fldID_Link = tblLink.getVal(0, 'fldID')  # Uses fact that tblLink arg. is updated by _createActivityRA().
+        #     if fldID_Link:
+        #         setRecord(self._tblLinkName, fldID=fldID_Link, fldExecuteData=executeFields,
+        #                   fldExcludedFields=excluded_fields)
+
+        # if self.doInventory(**kwargs):
+        #     _ = self.outerObject.inventory.set()
 
         return retValue
 
 
-    def get(self, *args: DataTable, sDate='', eDate='', meas_name: str = '', **kwargs):
+    def get(self, *args, mode='mem', full_record=False, uid=None, all_records=None, meas_name: str = '', **kwargs):
         """
         Returns data from table [Data Mediciones] between sValue and eValue. sValue=eValue ='' -> Last record
         @param sDate: No args -> Last Record;  sDate=eDate='' -> Last Record;
@@ -1226,7 +1401,7 @@ class MeasurementActivityAnimal(AnimalActivity):
         in full.
         @return: {'name': meas_name, 'value': mease_val, 'units': meas_units} for measurement. meas_name, meas_units are
         strings ("temperatura", "degc", "peso", "ton", "kg", etc.).
-        DataTable object if multiple records must be returned.
+        DataFrame object with 1 or more records.
         {} if nothing's found.
         """
         retValue = {}
@@ -1237,21 +1412,23 @@ class MeasurementActivityAnimal(AnimalActivity):
         if m_id not in self._measurementsDict.values():
             return f'ERR_INP_Argument(s): Invalid or missing measurement name {m_id}.'
         if self._isValid and self.outerObject.validateActivity(self._activityName):
-            qryTable = getRecords(self.__tblDataName, sDate, eDate, None, '*', fldFK_NombreMedicion=m_id)
-            if isinstance(qryTable, DataTable):
-                if qryTable.dataLen:
-                    filteredTable = qryTable.getIntervalRecords('fldDate', sDate, eDate, 1)  # mode=1: Date field.
-                    if filteredTable.dataLen <= 1:   # qryTable tiene 1 solo registro (Ultimo o Primero)
-                        retValue = {'name': next((k for k in self._measurementsDict if self._measurementsDict[k] ==
-                                                  filteredTable.getVal(0, 'fldFK_NombreMedicion')), None),
-                                    'value': filteredTable.getVal(0, 'fldValue', VOID),
-                                    'units': next((k for k in self._unitsDict if self._unitsDict[k][0] ==
-                                                   filteredTable.getVal(0, 'fldFK_Unidad')), None)
-                                    }
-                        print(f'{moduleName()}({lineNum()}) retValue: {retValue}', dismiss_print=DISMISS_PRINT)
-                    else:
-                        # Returns DataTable with multiple records.
-                        retValue = filteredTable
+            # qryTable = getRecords(self.__tblDataName, sDate, eDate, None, '*', fldFK_NombreMedicion=m_id)
+            query_df = getrecords(self.__tblDataName, '*',
+                                  where_str=f'WHERE "{getFldName(self.__tblDataName, "fldFK_NombreMedicion")}"=={m_id}')
+            if not query_df.empty:
+                return query_df
+                # filteredTable = qryTable.getIntervalRecords('fldDate', sDate, eDate, 1)  # mode=1: Date field.
+                # if filteredTable.dataLen <= 1:   # qryTable tiene 1 solo registro (Ultimo o Primero)
+                #     retValue = {'name': next((k for k in self._measurementsDict if self._measurementsDict[k] ==
+                #                               filteredTable.getVal(0, 'fldFK_NombreMedicion')), None),
+                #                 'value': filteredTable.getVal(0, 'fldValue', VOID),
+                #                 'units': next((k for k in self._unitsDict if self._unitsDict[k][0] ==
+                #                                filteredTable.getVal(0, 'fldFK_Unidad')), None)
+                #                 }
+                #     print(f'{moduleName()}({lineNum()}) retValue: {retValue}', dismiss_print=DISMISS_PRINT)
+                # else:
+                #     # Returns DataTable with multiple records.
+                #     retValue = filteredTable
         return retValue
 
 
@@ -1263,12 +1440,109 @@ class MeasurementActivityAnimal(AnimalActivity):
 
 
 @singleton
+class ParturitionActivityAnimal(AnimalActivity):
+    __tblDataName = 'tblDataAnimalesActividadParicion'
+    __activityName = 'Paricion'
+    __method_name = 'parturition'
+    _short_name = 'partur'  # Activity short name. 6 chars. Used by Activity._paCreate(), Activity.__isClosingActivity()
+    __one_time_activity = False
+
+    @classmethod
+    def tblDataName(cls):
+        return cls.__tblDataName
+
+    @classmethod
+    def getActivityName(cls):
+        return cls.__activityName
+
+    def __init__(self, *args, **kwargs):
+        # Registers activity_name to prevent re-instantiation in GenericActivity.
+        self.definedActivities()[self.__activityName] = self
+        kwargs['supportsPA'] = False        # En principio, no se puede programar una paricion. Cesarea si.
+        kwargs['decorator'] = self.__method_name
+        # Flag to signal only-once activities (castracion, destete, salida, etc.)
+        kwargs['one_time_activity'] = self.__one_time_activity
+        super().__init__(self.__activityName, *args, tbl_data_name=self.__tblDataName, **kwargs)
+
+    def set(self, *args, event_date=None, parturition_status=1, execute_fields=None, excluded_fields=()):
+        """
+        Sets parturition date for Animal. Updates tables: Animales, Animales Registro De Actividades,
+        Link Animales Actividades, Data Animales Actividad Paricion
+        @param parturition_status: int
+            0: Malparturition, stillborn, abortion.
+            1: Born alive. Normal delivery.
+            2: Born alive. C-section.
+        @param event_date: datetime
+        @return: idActivityRA of created activity (int) or error code (str)
+        """
+        if 'f' not in self.outerObject.mf:
+            return f'ERR_INP_Invalid object for parturition.'   # Exits if Animal is not female.
+        if not event_date or not isinstance(event_date, datetime):
+            event_date = None   # Si no se pasa event_date valido, deja que lo setee _createActivityRA()
+
+        # tblObjects = DataTable(self.tblObjName())
+        # tblRA = next((j for j in args if isinstance(j, DataTable) and j.tblName == self._tblRAName), None)
+        # tblLink = next((j for j in args if isinstance(j, DataTable) and j.tblName == self._tblLinkName), None)
+        # tblData = next((j for j in args if isinstance(j, DataTable) and j.tblName == self.tblDataName()), None)
+        dfRA, dfLink, dfData = self.set3frames(*args, dfRA_name=self._tblRAName, dfLink_name=self._tblLinkName,
+                                               dfData_name=self.tblDataName(), default='dataframe')
+        args = list(args)
+        args.append(dfRA)
+        args.append(dfLink)
+        args.append(dfData)
+
+        dfData.loc[0, ('fldDate', 'fldFK_ResultadoDeParicion')] = (event_date, parturition_status)
+        c_section = (parturition_status == 2)
+        # activityID = AnimalActivity.getActivitiesDict().get(self.__activityName)
+        dfRA.loc[0, 'fldFK_NombreActividad'] = self._activityID
+        retValue = self._createActivityRA(dfRA, dfLink, dfData)
+        if isinstance(retValue, str):
+            krnl_logger.error(f'ERR_DBAccess. Cannot read from tbl {dfData.db.tbl_name}. Error: {retValue}')
+            return retValue
+        # Sets new category if this was the animal's 1st parturition.
+        if 'vaca' not in self.outerObject.category.get(id_type='name').lower():
+            self.outerObject.category.set(category='vaca')
+
+        if isinstance(retValue, int) and c_section:     # c-sections can be a ProgActivity. Normal delivery can't.
+            excluded_fields = set(excluded_fields) if isinstance(excluded_fields, (list, set, tuple, dict)) else set()
+            excluded_fields.update(self.getActivityExcludedFieldsClose(self.__activityName))
+            executeFields = self.activityExecuteFields(execution_date=self.outerObject.inventory.get())
+            if execute_fields and isinstance(execute_fields, dict):
+                executeFields.update(execute_fields)  # execute_fields adicionales, si se pasan.
+            self._paMatchAndClose(retValue, execute_fields=executeFields, excluded_fields=excluded_fields)
+            # Updates cols in tblLink, so that external nodes can access Execute Data, Excluded Fields.
+            fldID_Link = dfLink.loc[0, 'fldID']   # Uses fact that tblLink argument is updated by _setInventory().
+            if fldID_Link:
+                setRecord(self._tblLinkName, fldID=fldID_Link, fldExecuteData=executeFields,
+                          fldExcludedFields=excluded_fields)
+        return retValue
+
+    # TODO: AMMEND alta() including mother data to incorporate parturition/birth activities.
+
+    def get(self):
+        """ Return a DataTable with all parturition records for the animal (Stored in the Multiple db table). Each
+        record keeps the full data of each parturition for the Animal.
+         @return: DataTable with parturition data. Empty DataTable if no parturitions recorded for animal.
+         Error string if error in reading from DB.
+         """
+        return self._get_link_records(activity_list=(self._activityID, ))
+
+
+@singleton
 class TMActivityAnimal(AnimalActivity):
     __tblDataName = 'tblDataAnimalesActividadTM'
     __tblMontosName = 'tblDataTMMontos'
     __activityName = 'Actividad MoneyActivity'
     __method_name = 'tm'
     _short_name = 'tm'  # Used by Activity._paCreate(), Activity.__isClosingActivity()
+
+    @classmethod
+    def tblDataName(cls):
+        return cls.__tblDataName
+
+    @classmethod
+    def getActivityName(cls):
+        return cls.__activityName
 
     def __init__(self, *args, **kwargs):
         isValid = True
@@ -1278,12 +1552,7 @@ class TMActivityAnimal(AnimalActivity):
         kwargs['decorator'] = self.__method_name
         super().__init__(self.__activityName, *args, tbl_data_name=self.__tblDataName, **kwargs)
 
-        self.__tblRA = setupArgs(self._tblRAName, *args)
-        self.__tblLink = setupArgs(self._tblLinkName, *args)
-        self.__tblData = setupArgs(self.__tblDataName, *args, **kwargs)
-        self.__tblMontos = setupArgs(self.__tblMontosName, *args)
-
-
+    # @Activity.activity_tasks(after=(Activity.doInventory, Activity.paScheduler))
     def set(self, *args: DataTable, **kwargs):
         """
         Inserts record "idActividadTM" in [Data Animales Actividad MoneyActivity]. Creates records in
@@ -1294,38 +1563,46 @@ class TMActivityAnimal(AnimalActivity):
         @param kwargs: Arguments passed to [Data Animales Actividad MoneyActivity] table.
         @return: idActividadRA: Success / errorCode (str) on error
         """
-        retValue = self._setTM(*args, **kwargs)
-        if not isinstance(retValue, str):
-            if self._doInventory(**kwargs):
-                _ = self.outerObject.inventory.set()
-        return retValue
+        dfRA, dfLink, dfData = self.set3frames(dfRA_name=self._tblRAName, dfLink_name=self._tblLinkName,
+                                               dfData_name=self.tblDataName(), default='dataframe')
+        args = list(args)
+        args.append(dfRA)
+        args.append(dfLink)
+        args.append(dfData)
+        return self._setTM(*args, **kwargs)
 
-    def get(self, sDate='', eDate='', *args, **kwargs):
+
+    def get(self, *args, full_record=False, uid=None, all_records=None, **kwargs):
         """
         Returns records in table [Data MoneyActivity Montos] between sValue and eValue. sValue=eValue ='' -> Last record
-        @param sDate: No args: Last Record; sDate=eDate='': Last Record;
-                        sDate='0' or eDate='0': First Record
-                        Otherwise: records between sDate and eDate
-        @param eDate: See @param sDate.
         @param kwargs: mode=datatable->Returns DataTable with full record.  mode='fullRecord' -> Returns last Record
         in full.
-        @return: Object DataTable with information from MoneyActivity Montos. Blank (val) object DataTable if nothing's found
+        @return: DataFrame with multiple records for uid | dictionary with latest record, with information
+        from MoneyActivity Montos | {} -> Nothing found.
         """
         retValue = None
         if self._isValid and self.outerObject.validateActivity(self.__activityName):
-            tmActivityRecords = self._getRecordsLinkTables(self.__tblRA, self.__tblLink, self.__tblData)
-            colAnimalActivity = tmActivityRecords.getCol('fldFK_ActividadTM')  # Recs c/ ID_ActividadTM de ID_Animal
+            dfRA, dfLink, dfData = self.set3frames(dfRA_name=self._tblRAName, dfLink_name=self._tblLinkName,
+                                                   dfData_name=self.tblDataName(), default='dataframe')
+            args = list(args)
+            args.append(dfRA)
+            args.append(dfLink)
+            args.append(dfData)
+            tmActivityRecords = self._get_link_records(uid=uid)
+            colAnimalActivity = tmActivityRecords['fldFK_ActividadTM'].tolist()  # Recs c/ ID_ActividadTM de ID_Animal
             if len(colAnimalActivity) > 0:
-                qryTable = getRecords(self.__tblMontosName, '', '', None, '*', fldFK_Actividad=colAnimalActivity)
-                if qryTable.dataLen:
-                    if qryTable.dataLen <= 1:
-                        retValue = qryTable  # qryTable tiene 1 solo registro (Ultimo o Primero)
+                colAniActivity_str = str(tuple(colAnimalActivity)) if len(colAnimalActivity) > 1 \
+                    else str(tuple(colAnimalActivity)).replace(',', '')
+                query_df = getrecords(self.__tblMontosName, '*',
+                    where_str=f'WHERE "{getFldName(self.__tblMontosName,"fldFK_Actividad")}" IN {colAniActivity_str}')
+                if not query_df.empty:
+                    if all_records:
+                        return query_df
                     else:
-                        retValue = qryTable.getIntervalRecords('fldDate', sDate, eDate, 1)  # mode=1: Date field.
-                    print(f'{moduleName()}({lineNum()}) retTable: {retValue.fldNames} // Data: {retValue.dataList}',
-                          dismiss_print=DISMISS_PRINT)
+                        latest_rec = query_df.loc[query_df['fldDate'] == query_df['fldDate'].max()].iloc[0]
+                        return latest_rec
             else:
-                retValue = self.__tblMontos     # Retorna DataTable blank (sin datos)
+                retValue = {}     # Retorna DataTable blank (sin datos)
         return retValue
 
     # def comp(self, val):
@@ -1336,9 +1613,18 @@ class TMActivityAnimal(AnimalActivity):
 class TagActivityAnimal(AnimalActivity):
     __tblDataName = 'tblDataAnimalesActividadCaravanas'
     __tblObjectsName = 'tblCaravanas'
+    __tblObjectDBName = getTblName(__tblObjectsName)
     __activityName = 'Caravaneo'
     __method_name = 'tags'
     _short_name = 'carava'  # Used by Activity._paCreate(), Activity.__isClosingActivity()
+
+    @classmethod
+    def tblDataName(cls):
+        return cls.__tblDataName
+
+    @classmethod
+    def getActivityName(cls):
+        return cls.__activityName
 
     def __init__(self, *args, **kwargs):
         isValid = True
@@ -1348,379 +1634,451 @@ class TagActivityAnimal(AnimalActivity):
         kwargs['decorator'] = self.__method_name
         super().__init__(self.__activityName, *args, tbl_data_name=self.__tblDataName, **kwargs)
 
-    @staticmethod
-    def __tagRegister():                # TODO: Tag.getRegisterDict() IS DEPRECATED. DO NOT USE!
-        """ Returns full Tag registerDict. Link to class Tag data structures.  Internal use only (cannot call with
-        @property tags)  """
-        return Tag.getRegisterDict()
 
-
-    def initializeTags(self, *args, **kwargs):
+    def initializeTags(self, *args, **kwargs):      # NEW: 'per individual tag' tag creation.
         """
         Assigns all active tags to ID_Animal (self), pulling the tags (previously assigned to the Animal)
-        from [Data Animales Actividades Caravanas]. If tags are not found, leaves myTags as empty set.
-        args: DataTables with info needed to process Tags. Passed as args to minimize DB reads.
-            args[0]: Desasignados from RA: list of fldID of Activity #25 (Caravaneo - Desasignar)
-        @return: None if all OK. ERR_ (str) if error.
+        from [Data Animales Actividades Caravanas]. If tags are not found, leaves myTags as an empty set.
+        args: DataFrame with info needed to process Tags (1 row per tag). Passed as args to minimize DB reads.
+        @return: True if all OK; None: DB read error; False if no tags assigned (TODO: Action must be taken by UI!)
         """
         if not self.outerObject.validateActivity(self._activityName):
-            retValue = f'ERR_Sys_ActivityNotDefined - {callerFunction()}()'
-            print(f'{moduleName()}({lineNum()}) - {retValue}', dismiss_print=DISMISS_PRINT)
+            retValue = f'ERR_SYS: ActivityNotDefined - {self.__activityName}.'
+            krnl_logger(f'{retValue}')
             return None
-
-        tagIDs = self.outerObject.getIdentifiers()      # list of tag UIDs
+        tag_uids = self.outerObject.getIdentifiers()  # list of tag UIDs in __identifiers attr. for Animal, Device, etc.
         objList = []
-        for i in tagIDs:
-            obj = Tag.getObject(i)
-            if isinstance(obj, Tag):
-                objList.append(obj)
+
+        # Gets a TagAnimal class to access the proper tagTechDicitionary and pull the Tag class from there.
+        tag_animal_class = self.outerObject._myTagClass()  # tag_animal_class is TagBovine, TagCaprine, etc.
+        for i in tag_uids:
+            obj = tag_animal_class.getObject(i)   # obj is type TagStandardBovine, TagStandardCaprine, TagRFIDMachine.
+            if isinstance(obj, tag_animal_class):
+                objList.append(obj)         # TODO: VER DE SETEAR Tag Status aqui.
         if objList:
             self.outerObject.setMyTags(*objList)
             # print(f'...Now setting tags: {self.outerObject.myTagIDs}')
             return True
-        return None
+        return False                # No tags found. UI must inform the user that the Animal is being used with no tags!
 
-
-    # def initializeTags00(self, *args, **kwargs):        # Old version
-    #     """
-    #     Assigns all active tags to ID_Animal (self), pulling the tags (previously assigned to the Animal)
-    #     from [Data Animales Actividades Caravanas]. If tags are not found, leaves myTags as empty set.
-    #     args: DataTables with info needed to process Tags. Passed as args to minimize DB reads.
-    #         args[0]: Desasignados from RA: list of fldID of Activity #25 (Caravaneo - Desasignar)
-    #     @return: None if all OK. ERR_ (str) if error.
-    #     """
-    #     if not self._isValid:
-    #         retValue = f'ERR_Sys_ObjectNotValid - {callerFunction()}()'
-    #         print(f'{moduleName()}({lineNum()}) - {retValue}', dismiss_print=DISMISS_PRINT)
-    #         return retValue
-    #     elif not self.outerObject.validateActivity(self._activityName):
-    #         retValue = f'ERR_Sys_ActivityNotDefined - {callerFunction()}()'
-    #         print(f'{moduleName()}({lineNum()}) - {retValue}', dismiss_print=DISMISS_PRINT)
-    #         return retValue
-    #
-    #     tagObjects = [o for o in Tag.getRegisterDict().values() if o.ID in self.outerObject.getIdentifiers()]
-    #     if len(tagObjects) != len(self.outerObject.getIdentifiers()):
-    #         # TODO(cmt): "Work with what's available" here:
-    #         # Some identifiers are not loaded as Tag objects in Tag.registerDict(). Try loading from Caravanas table
-    #         # in case that memory-updating routines haven't processed the data just yet.
-    #         Tag.processReplicated()     # This one should be re-entrant. It must be.
-    #
-    #     if tagObjects:
-    #         self.outerObject.setMyTags(*tagObjects)
-    #         # print(f'...Now setting tags: {[t.tagNumber for t in tagObjects]}')
-    #         return True
-    #
-    #
-    #     # Old code, for when __identifiers is not set in self.outerObject.
-    #     dataRADesasignados = args[0] if args else \
-    #         getRecords('tblAnimalesRegistroDeActividades', '', '', None, "*",
-    #                    fldFK_NombreActividad=self.activities['Caravaneo - Desasignar'])
-    #     __tblRA = setupArgs(self._tblRAName, *args)
-    #     __tblLink = setupArgs(self._tblLinkName, *args)
-    #     __tblData = setupArgs(self.__tblDataName, *args, **kwargs)
-    #     # animalClassName = self.outerObject.animalClassName
-    #
-    #     # Registros de Asignacion/Desasignacion de Caravanas para el idAnimal
-    #     animalTagRecords = self._getRecordsLinkTables(__tblRA, __tblLink, __tblData, activity_list=('Alta', 'Caravaneo',
-    #                                                  'Caravaneo - Desasignar'))
-    #     skipList = []  # fldID de Registros que se deben excluir por Desasignacion de Caravanas.
-    #     idCaravanaList = []  # Lista de ID_Caravana que se deben asignar al Animal
-    #     if dataRADesasignados.dataLen:
-    #         for i in range(animalTagRecords.dataLen):  # Puebla skipList con idActividad de Caravanas desasignadas
-    #             if animalTagRecords.getVal(i, 'fldFK_Actividad') in dataRADesasignados.dataList:
-    #                 for j in range(animalTagRecords.dataLen):
-    #                     if animalTagRecords.getVal(j, 'fldFK_Caravana') == animalTagRecords.getVal(i, 'fldFK_Caravana'):        # TODO: Aqui puede comparar UUIDs directamente.
-    #                         skipList.append(animalTagRecords.getVal(j, 'fldFK_Actividad'))
-    #                 skipList.append(animalTagRecords.getVal(i, 'fldFK_Actividad'))
-    #
-    #     for i in range(animalTagRecords.dataLen):  # PUebla idCaravanaList solo con Tags activos
-    #         if animalTagRecords.getVal(i, 'fldFK_Actividad') is not None and \
-    #                 animalTagRecords.getVal(i, 'fldFK_Actividad') not in skipList:
-    #             idCaravanaList.append(animalTagRecords.getVal(i, 'fldFK_Caravana'))  # agrega ID_Caravana (UUID)
-    #
-    #     # Asigna Tags al Animal: Busca en Tag.__registerDict y si no esta ahi, crea la caravana.
-    #     retValue = None
-    #     if idCaravanaList:
-    #         # idCaravanaList = [f'"{j}"' for j in idCaravanaList]
-    #         tagRecords = getRecords('tblCaravanas', '', '', None, '*', fldObjectUID=idCaravanaList)
-    #         if isinstance(tagRecords, str):
-    #             retValue = f'ERR_Sys_CannotInitializeTag {idCaravanaList}'
-    #             krnl_logger.error(retValue)
-    #             return retValue
-    #         else:
-    #             idCaravanaList = tagRecords.getCol('fldObjectUID')  # OJO: getCol ignora (salta) registros vacios de _dataList
-    #         for j in range(len(idCaravanaList)):
-    #             if idCaravanaList[j] in self.__tagRegister():  # __registerDict Tag Class correspondiente
-    #                 self.outerObject.setMyTags(self.__tagRegister()[idCaravanaList[j]])
-    #             else:  # Si Tag no existe en TagRegisterDict la crea buscando el ID de la caravana en DB
-    #                 tempTag = Tag(**tagRecords.unpackItem(j))  # Crea tag con datos de record fldID=idCaravanaList[j]
-    #                 # Si existe ya un tag con el mismo UID para la clase de objeto outerObject, da WARNING y sale.
-    #                 if any(self.__tagRegister()[j].ID == tempTag.ID and self.__tagRegister()[j].assignedToClass ==
-    #                        tempTag.assignedToClass and not self.__tagRegister()[j].isAvailable
-    #                        for j in self.__tagRegister()):
-    #                     retValue = f'INFO_CannotAssignTag: Tag UID {tempTag.tagNumber} / {tempTag.ID} already in use. '\
-    #                                f'Tag was not assigned to Object {self.outerObject.ID}'
-    #                     krnl_logger.warn(retValue, stack_info=True)
-    #                 else:
-    #                     if tempTag.assignedToClass != self.outerObject.__class__.__name__:
-    #                         _ = setRecord(self.__tblObjectsName, fldID=tempTag.recordID,
-    #                                       fldAssignedToClass=self.outerObject.__class__.__name__)  # TODO:HAS to be name
-    #                         if isinstance(_, str):
-    #                             retValue = f'ERR_DBWrite: Cannot write table {self.__tblObjectsName}'
-    #                             krnl_logger.error(retValue, stack_info=True)
-    #                             # self.outerObject = None  # Removes object from list. Enables recursion/reentry.
-    #                             return retValue
-    #                         else:
-    #                             tempTag.assignedToClass = self.outerObject.__class__.__name__
-    #                     tempTag.register()
-    #                     self.outerObject.setMyTags(tempTag)
-    #     return retValue
 
 
     # Animal: Caravaneo / Caravanas: Comision, Reemplazo, Reemision
-    def assignTags(self, *args: DataTable, **kwargs):
+    @Activity.activity_tasks(after=(Activity.doInventory,))
+    def assignTags(self, *args: pd.DataFrame, comm_type='Comision', tag_list=None, **kwargs):
+        # 04Aug24: Implements use of obj_dataframe() as an iterator. Fixes bugs.
         """
-        Assigns Tags in *args to Animal. Updates tables in DB.
+        Assigns Tags in *args to Animal. Updates tables in DB. This is a physical assignment of tags (PHATT) activity.
+        Commissions all tags via the Tag.commission() method, which sets the Physically-Attached attribute for the tag.
+        @param tag_list: iterable with Tag objects or tag uids (str) to assign to Animal (list | tuple)
+        @param comm_type: 'Comision'(Default), 'Reemplazo', 'Reemision'. sets the Activity for Tag (str)
         @param args: DataTables to use in operation (tblRA for idActividadRA, tblLink for fldIDLink, etc)
         @param kwargs: tags=[Tag, ]. List of Tag Objects to assign (1 or more)
-                        tagCommissionType='Comision'(Default), 'Reemplazo', 'Reemision'. sets the Activity for Tag
+               - set_tag_inventory: False -> Avois duplicating tag inventories (Tag Inventory is set by commission.set)
         @return: idActividad (int) or errorCode (str)
         """
         activityName = 'Caravaneo'
-        activityID = self.activities[activityName]
         if not self._isValid or not self.outerObject.validateActivity(activityName):
-            retValue = f'ERR_Sys_ObjectNotValid or ActivityNotValid - {callerFunction()}()'
+            retValue = f'ERR_Sys_ObjectNotValid or ActivityNotValid - {callerFunction()}.'
             krnl_logger.info(retValue)
             print(f'{moduleName()}({lineNum()}) - {retValue}', dismiss_print=DISMISS_PRINT)
             return retValue
 
-        tags = kwargs.get('tags', [])
-        tags = tags if hasattr(tags, '__iter__') else [tags, ]
-        tags = [j for j in tags if isinstance(j, Tag)]
-        if tags:
-            __tblRA = setupArgs(self._tblRAName, *args)
-            __tblLink = setupArgs(self._tblLinkName, *args)
-            __tblData = setupArgs(self.__tblDataName, *args, **kwargs)
-            activityID = activityID or __tblRA.getVal(0, 'fldFK_NombreActividad')
-            __tblRA.setVal(0, fldFK_NombreActividad=activityID)
+        # kwargs.update({'set_tag_inventory': False})   # Instructs _setInventory not to record inventory for tags. TODO: see if this works!!
 
-            # Valida que todos los tag IDs esten en tabla tblCaravanas
-            tagRecords = getRecords(self.__tblObjectsName, '', '', None, '*', fldObjectUID=tuple([t.ID for t in tags]))
-            if isinstance(tagRecords, str):
-                retValue = f'ERR_DBRread: Cannot read table {self.__tblObjectsName}'
-                krnl_logger.error(retValue, stack_info=True, exc_info=True)
-                # self.outerObject = None  # Removes object from list. Enables recursion/reentry.
-                return retValue
-            idCol = tagRecords.getCol('fldObjectUID')
+        # tag_list may carry 3 flavors: Tag objects, Tag UIDs and plain numbers (str). The code below addressed them all
+        tags = list(tag_list) if isinstance(tag_list, collections.abc.Iterable) else [tag_list, ]
+        tag_objs = [t for t in tags if isinstance(t, Tag) and t.isAvailable]      # 1. List of Tag objects
+        tag_uids = []
+        tag_class = self.outerObject._myTagClass()  # Pulls the proper tag class for tag creation. (TagBovine, etc.)
+        for t in tags.copy():
+            if isinstance(t, str):
+                try:
+                    tag_uids.append(uuid.UUID(t).hex)           # Appends all tags with valid UUID format.
+                except(TypeError, SyntaxError, AttributeError, ValueError):
+                    continue
+                else:
+                    tags.remove(t)
+        tag_numbers = [t for t in tags if isinstance(t, str)]  # Only strings left are numbers. UIDs were removed above.
+        tag_identifs = [Tag.create_identifier(elements=(num, Tag._tagIdentifierChar, self.__class__.__name__))
+                        for num in tag_numbers]     # Identifier: "123-Bovine", "777-Caprine", etc.
 
-            wrtTables = []
-            permittedTagAssignStatus = (1, 3, None, '')  # Alta:1, Decomisionada:3
-            tagActivity = next((kwargs[j] for j in kwargs if 'commission' in str(j).lower()
-                                or 'comision' in str(j).lower()), 'Comision')
-            tagActivity = removeAccents(tagActivity) if tagActivity in Tag.getActivitiesDict() else 'Comision'
+        # Split tag_identifiers between those that exist in node and those that don't.
+        identifs_in_node = {}                               # identifs_in_node: {identifier_str: tag_uid}
+        identifs_not_in_node = {}
+        for identif in tag_identifs:
+            for tags_df in tag_class.obj_dataframe():
+                if identif in tags_df['fldIdentificadores']:
+                    # TODO: check if this assignment is of the correct type.
+                    identifs_in_node[identif] = \
+                        tags_df.loc[tags_df['fldIdentificadores'] == identif, 'fldObjectUID'].tolist()[0]
+                else:
+                    identifs_not_in_node[identif] = None
+
+        # Request confirmation of non-existing tags
+        for identif in identifs_not_in_node:
+            dicto = Tag.identifier_get_user_confirmation(identif)  # Returns dict if confirmed, {} if NOT confirmed.
+            if dicto:
+                # creates new tag in database and creates tag object
+                tag_obj = tag_class.alta(**dicto)
+                identifs_in_node[identif] = tag_obj  # If confirmed creates new tag obj and adds it to identifs_in_node.
+
+        # At this point identifs_in_node.values() is made of tag uids and tag objects.Must create objects from uids left
+        for k, v in identifs_in_node.items():
+            if isinstance(v, str):
+                # Creates object from uid and update identifs_in_node dict.
+                tag_obj = tag_class.getObject(uid=v)      # tag_class.getObject() pulls the right Tag class for tech.
+                if isinstance(tag_obj, tag_class):
+                    identifs_in_node[k] = tag_obj    # Final form of this identifs_in_node: {__identifier: tag object}
+
+        # Appends any tags passed as tag objects.
+        for t in tag_objs:
+            identifs_in_node.update({t.getIdentifiers(): t})        # getIdentifiers() -> returns str ('8330-Bovine')
+
+        # And here, identifs_in_node is fully made of {identifier: tag_obj, }. Goes to commission available tags.
+        tagActivity = removeAccents(comm_type).title()  # Capitalizes all words. That's the standard in the db.
+        tagActivity = tagActivity if tagActivity in Tag.getActivitiesDict().values() else 'Comision'
+        # Setea Actividad para Caravanas. MISMA Actividad para todos los tags
+        if 'emplaz' in tagActivity or 'eplace' in tagActivity:
+            tagActivity = 'Comision - Reemplazo'
+            tagStatus = 'Reemplazada'           # TODO: This part not yet implemented. For now, activity=Comision.
+        elif 'emision' in tagActivity or 'emission' in tagActivity:
+            tagActivity = 'Comision - Reemision'
             tagStatus = 'Comisionada'
-            # Setea Actividad para Caravanas. MISMA Actividad para todos los tags
-            if 'emplazo' in tagActivity:
-                tagActivity = 'Comision - Reemplazo'
-                tagStatus = 'Reemplazada'
-            elif 'emision' in tagActivity or 'emission' in tagActivity:
-                tagActivity = 'Comision - Reemision'
-                tagStatus = 'Comisionada'
-            else:
-                pass
+        else:
+            tagStatus = 'Comisionada'
 
-            timeStamp = time_mt('datetime')
-            eventDate = timeStamp
-            userID = __tblRA.getVal(0, 'fldFK_UserID') if __tblRA.getVal(0, 'fldFK_UserID') is not None else \
-                sessionActiveUser
-            # Escritura basica de tablas para insertar el tag en la tabla de Caravanas del Animal
-            __tblRA.setVal(0, fldFK_NombreActividad=activityID, fldTimeStamp=timeStamp, fldFK_UserID=userID)
-            idActividadRA = setRecord(__tblRA.tblName, **__tblRA.unpackItem(0))
-            if isinstance(idActividadRA, str):
-                retValue = f'ERR_DB_WriteError: {idActividadRA} - Func/Method: MyTags.assignTags()'
-                krnl_logger.error(retValue)
-                print(f'{moduleName()}({lineNum()}) - {retValue}', dismiss_print=DISMISS_PRINT)
-                # self.outerObject = None  # Removes object from list. Enables recursion/reentry.
-                return retValue
-            # Setea valores en tabla Link
-            commentLink = __tblLink.getVal(0, 'fldComment') if __tblLink.getVal(0, 'fldComment') else "" + \
-                                                            f'Activity: {activityName} / {timeStamp}'
-            __tblLink.setVal(0, fldFK_Actividad=idActividadRA, fldFK=self.outerObject.getID, fldComment=commentLink)
-            __tblLink.undoOnError = True  # Se deben deshacer escrituras previas si falla escritura
-            wrtTables.append(__tblLink)  # Si no se paso idActividad RA, escribe tabla Link
+        dfRA, dfLink, dfData = self.set3frames(*args, dfRA_name=self._tblRAName, dfLink_name=self._tblLinkName,
+                                               dfData_name=self.tblDataName(), default='dataframe')
 
-            for t in tags:
-                if isinstance(t, Tag) and t.status.get() in permittedTagAssignStatus:
-                    if t.assignedToClass != self.outerObject.__class__.__name__:
-                        # Actualiza tblCaravanas con fldAssignedToClass=Nombre de clase del objeto al que se asigna t
-                        if t.ID in idCol:
-                            _ = setRecord(self.__tblObjectsName, fldID=t.recordID,
-                                          fldAssignedToClass=self.outerObject.__class__.__name__,
-                                          fldAssignedToUID=self.outerObject.ID)
-                            if isinstance(_, str):
-                                retValue = f'ERR_DBWrite: Cannot write table {self.__tblObjectsName}'
-                                krnl_logger.error(retValue, stack_info=True)
-                                continue   # Continua a procesar el siguiente tag.
-                            else:
-                                t.assignedToClass = self.outerObject.__class__.__name__
-                                # Setea datos de tag en tbl del outerObject al que se asigna la Caravana
-                                self.outerObject.setIdentifier(t.ID)
-                        else:
-                            retValue = f'ERR_Sys: Tag Number {t.tagNumber} / ID={t.ID} not found in DB'
-                            krnl_logger.error(retValue, stack_info=True)
-                            continue   # Continua a procesar el siguiente tag.
+        time_now = time_mt('dt')        # Discards dates in the future for timeStamp, eventDate.
+        timeStamp = min(dfRA.loc[0, 'fldTimeStamp'] if not dfRA.empty and 'fldTimeStamp' in dfRA else time_now, time_now)
+        eventDate = min(getEventDate(tblDate=dfData.loc[0, 'fldDate'] if not dfData.empty and 'fldDate' in dfData
+                                            else 0, defaultVal=timeStamp, **kwargs), timeStamp)
+        dfData.loc[0, 'fldDate'] = eventDate
 
-                    self.outerObject.setMyTags(t)  # registra Tag en el array de Tags del Animal
-                    t.commission.set(activityName=tagActivity)  # Comisiona y Setea status de
-                    # Setea valores en tabla Data Actividad Caravanas y escribe
-            tagIDs = self.outerObject.myTagIDs          # convierte lista a json para escribir en DB.
-            __tblData.appendRecord(fldFK_Actividad=idActividadRA, fldFK_Caravana=tagIDs, fldDate=eventDate,
-                                   fldComment=f'Actividad: {activityName}. Tag ID: {tagIDs}')
+        # Commissions all the available tags.
+        # self.outerObject.tags_read.clear()  # resets tags_read list.
+        for t in identifs_in_node.values():
+            if t.isAvailable:
+                t.commission.set(activityName=tagActivity, assigned_to_class=self.outerObject.__class__.__name__)
+                self.outerObject.setMyTags(t)  # registra Tag en el array de Tags del Animal. Actualiza __identifiers.
 
-            wrtTables.append(__tblData)
-            if __tblData.dataLen:
-                retValue = [setRecord(j.tblName, **j.unpackItem(0)) for j in wrtTables]
-            else:
-                retValue = f'ERR_INP_Empty tag string.'
-                krnl_logger.info(retValue, stack_info=True)
-                return retValue
-            # Si hay error de escritura en tblLink o tblData, hace undo de tblRA y sale con error.
-            if any(isinstance(j, str) for j in retValue):
-                if __tblRA.getVal(0, 'fldID') is None:
-                    _ = delRecord(__tblRA.tblName, idActividadRA)
-                retValue = 'ERR_DB_WriteError.' + f' {moduleName()}({lineNum()})- {callerFunction()}'
-                krnl_logger.error(retValue)
-                print(f'Deleting record {idActividadRA} / Table: {__tblRA.tblName} / retValue: {retValue}',
-                      dismiss_print=DISMISS_PRINT)
-            else:
-                retValue = idActividadRA
-                if self._doInventory(**kwargs):
-                    self.outerObject.inventory.set(*args, **kwargs)
-            # self.outerObject = None  # Removes object from list. Enables recursion/reentry.
+                # Attribute with list of tags physically read in the activity, used to set inventory for Tags.
+                self.outerObject.tags_read.append(t)
+
+        # Assigns all commissioned tags to Animal object
+        # 1. Updates Animales."Identificadores" field.
+        df_identifs = pd.read_sql_query(f'SELECT "{getFldName(self.tblObjName(), "fldIdentificadores")}" FROM '
+                                        f'"{self.tblObjDBName()}" WHERE "UID_Objeto" == "{self.outerObject.ID}"; ',
+                                        SQLiteQuery().conn)
+        identifs = set(df_identifs.loc[0, "fldIdentificadores"]) if \
+                       isinstance(df_identifs.loc[0, "fldIdentificadores"], collections.abc.Iterable) else set()
+        tagIDs = self.outerObject.myTagIDs
+        identifs.update(tagIDs)
+        if identifs != (set(df_identifs.loc[0, "fldIdentificadores"]) if
+                        isinstance(df_identifs.loc[0, "fldIdentificadores"], collections.abc.Iterable) else set()):
+            _ = setRecord(self.tblObjName(), fldID=self.outerObject.recordID, fldIdentificadores=identifs)
+            self.outerObject._init_uid_dicts()      # Reloads object dataframe with new fldIdentificadores data.
+
+        # 2. Creates assignTag Activity for Animal: Updates db tables tblRA, tblLink, tblData
+        # tblLink: 1 record per Animal being operated on (1 in this case).
+        # tblData: 1 record per tag being assigned. MULTIPLE RECORDS in this case.
+        # Updates tblDataAnimalesCaravanas: 1 row per tag assigned to the Animal.Same idActividadRA from assign Activity
+        for j, t in enumerate(self.outerObject.tags_read):
+            # appends rows(s) to dfData
+            dfData.loc[j, ('fldFK_Caravana', 'fldComment', 'fldDate')] = \
+                (t.ID, f'Actividad: {activityName}. Tag ID: {t.tagNumber} / {t.ID}.', eventDate)
+            # Setea datos de tag en tbl del outerObject al que se asigna la Caravana
+        # TODO: This call counts on dfRA, dfLink fully setup by _createActivityRA(). CHECK OPERATION (04Aug24)
+        # TODO (24Aug24): REMOVE _tags_read from object's attribute, make it a function local variable in needed.
+        idActividadRA = self._createActivityRA(dfRA, dfLink, dfData)
+        self.outerObject.tags_read.clear()     # Clears _tags_read list after it's done with it.
+        if isinstance(idActividadRA, str):
+            retValue = f'ERR_DBAccess: Cannot read table {dfRA.db.tbl_name}'
+            krnl_logger.error(retValue, stack_info=True, exc_info=True)
             return retValue
-        return None
+        retValue = idActividadRA
+        # dfRA.loc[0, 'fldID'] = idActividadRA
+        return retValue
 
-    def deassignTags(self, *args: DataTable, **kwargs):         # Caravaneo - Desasignar (ID=71)
+
+
+    # def assignTags03(self, *args: DataTable, comm_type='Comision', tag_list=None, **kwargs):
+    #     """
+    #     Assigns Tags in *args to Animal. Updates tables in DB.
+    #     Commissions all tags via the Tag.commission() method, which sets the Physically-Attached attribute for the tag.
+    #     @param tag_list: iterable with Tag objects or tag uids (str) to assign to Animal (list | tuple)
+    #     @param comm_type: 'Comision'(Default), 'Reemplazo', 'Reemision'. sets the Activity for Tag (str)
+    #     @param args: DataTables to use in operation (tblRA for idActividadRA, tblLink for fldIDLink, etc)
+    #     @param kwargs: tags=[Tag, ]. List of Tag Objects to assign (1 or more)
+    #            - set_tag_inventory: False -> Avois duplicating tag inventories (Tag Inventory is set by commission.set)
+    #     @return: idActividad (int) or errorCode (str)
+    #     """
+    #     activityName = 'Caravaneo'
+    #     if not self._isValid or not self.outerObject.validateActivity(activityName):
+    #         retValue = f'ERR_Sys_ObjectNotValid or ActivityNotValid - {callerFunction()}.'
+    #         krnl_logger.info(retValue)
+    #         print(f'{moduleName()}({lineNum()}) - {retValue}', dismiss_print=DISMISS_PRINT)
+    #         return retValue
+    #
+    #     # tag_list may carry 3 flavors: Tag objects, Tag UIDs and plain numbers. The code below addressed them all.
+    #     tags = tag_list if hasattr(tag_list, '__iter__') else [tag_list, ]
+    #     tag_objs = [t for t in tags if isinstance(t, Tag) and t.isAvailable]      # List of Tag objects
+    #     tag_uids = []
+    #     tag_class = self.outerObject._myTagClass()  # Pulls the proper tag class for tag creation. (TagBovine, etc.)
+    #     obj_df = tag_class.obj_dataframe()
+    #     for t in tags.copy():
+    #         if isinstance(t, str):
+    #             try:
+    #                 tag_uids.append(uuid.UUID(t).hex)
+    #             except(TypeError, SyntaxError, AttributeError, ValueError):
+    #                 continue
+    #             else:
+    #                 tags.remove(t)
+    #     tag_numbers = [t for t in tags if isinstance(t, str)]  # Only strings left are numbers. UIDs were removed above.
+    #     tag_identifs = [Tag.create_identifier(elements=(num, Tag._tagIdentifierChar, self.__class__.__name__))
+    #                     for num in tag_numbers]     # Identifier: "123-Bovine", "777-Caprine", etc.
+    #     # Split tag_identifiers between those that exist in node and those that don't.
+    #     existing_ids = {}                               # existing_ids here: {__identifier: tag_uid}
+    #     non_existing_ids = {}
+    #     for t in tag_identifs:
+    #         if t in obj_df['fldIdentificadores']:       # .tolist() # Tag.get_identifiers_dict():
+    #             # TODO: check if this assignment is of the correct type.
+    #             existing_ids[t] = obj_df.loc[obj_df['fldIdentificadores'] == t, 'fldObjectUID']
+    #         else:
+    #             non_existing_ids[t] = None
+    #
+    #     # Request confirmation of non-existing tags
+    #     for identif in non_existing_ids:
+    #         dicto = Tag.identifier_get_user_confirmation(identif)  # Returns dict if confirmed, {} if NOT confirmed.
+    #         if dicto:
+    #             # creates new tag in database and creates tag object
+    #             tag_obj = tag_class.alta(**dicto)
+    #             existing_ids[identif] = tag_obj  # If confirmed, creates new tag and adds tag_obj to existing_ids.
+    #
+    #     # At this point existing_ids.values() is made of tag uids and tag objects. Must create objects from uids left.
+    #     for k, v in existing_ids.items():
+    #         if isinstance(v, str):
+    #             # Creates object from uid and update existing_ids dict.
+    #             tag_obj = tag_class.getObject(uid=v)      # tag_class.getObject() pulls the right Tag class for tech.
+    #             if isinstance(tag_obj, tag_class):
+    #                 existing_ids[k] = tag_obj             # Final form of this existing_ids: {__identifier: tag object}
+    #
+    #     # Adds any tags passed as tag objects.
+    #     for t in tag_objs:
+    #         existing_ids.update({t.getIdentifiers(): t})        # getIdentifiers() -> returns a uid string.
+    #
+    #     # And here, existing_ids is fully made of {identifier: tag_obj, }. Goes to commission available tags.
+    #     tagActivity = removeAccents(comm_type).title()  # Capitalizes all words. That's the standard in the db.
+    #     tagActivity = tagActivity if tagActivity in Tag.getActivitiesDict().values() else 'Comision'
+    #     # Setea Actividad para Caravanas. MISMA Actividad para todos los tags
+    #     if 'emplaz' in tagActivity or 'eplace' in tagActivity:
+    #         tagActivity = 'Comision - Reemplazo'
+    #         tagStatus = 'Reemplazada'           # TODO: This part not yet implemented. For now, activity=Comision.
+    #     elif 'emision' in tagActivity or 'emission' in tagActivity:
+    #         tagActivity = 'Comision - Reemision'
+    #         tagStatus = 'Comisionada'
+    #     else:
+    #         tagStatus = 'Comisionada'
+    #
+    #     dfRA = next((j for j in args if isinstance(j, pd.DataFrame) and j.db.tbl_name == self._tblRAName),
+    #                  pd.DataFrame.db.create(self._tblRAName))
+    #     dfLink = next((j for j in args if isinstance(j, pd.DataFrame) and j.db.tbl_name == self._tblLinkName),
+    #                    pd.DataFrame.db.create(self._tblLinkName))
+    #     dfData = next((j for j in args if isinstance(j, pd.DataFrame) and j.db.tbl_name == self.tblDataName()),
+    #                    pd.DataFrame.db.create(self.tblDataName()))
+    #     time_now = time_mt('dt')        # Discards dates in the future for timeStamp, eventDate.
+    #     timeStamp = min(dfRA.loc[0, 'fldTimeStamp'] or time_now, time_now)
+    #     eventDate = min(getEventDate(tblDate=dfData.loc[0, 'fldDate'], defaultVal=timeStamp, **kwargs), timeStamp)
+    #     dfData.loc[0, 'fldDate'] = eventDate
+    #
+    #     # Commissions all the available tags.
+    #     self.outerObject._tags_read.clear()  # resets tags_read list.
+    #     for t in existing_ids.values():
+    #         if t.isAvailable:
+    #             t.commission.set(activityName=tagActivity, assigned_to_class=self.outerObject.__class__.__name__)
+    #             self.outerObject.setMyTags(t)  # registra Tag en el array de Tags del Animal. Actualiza __identifiers.
+    #             # Attribute with list of tags physically read in the activity, used to set inventory for Tags.
+    #             self.outerObject._tags_read.append(t)
+    #
+    #     # Assigns all commissioned tags to Animal object
+    #     # 1. Updates Animales."Identificadores" field.
+    #     df_identifs = pd.read_sql_query(f'SELECT {getFldName(self.tblObjName(), "fldIdentificadores")} FROM '
+    #                                         f'{self.tblObjDBName()} WHERE "UID_Objeto" == "{self.outerObject.ID}"; ')
+    #     identifs = set(df_identifs.loc[0, "fldIdentificadores"])
+    #     tagIDs = self.outerObject.myTagIDs  # convierte lista a json para escribir en DB.
+    #     identifs.update(tagIDs)
+    #     if identifs != set(df_identifs.loc[0, "fldIdentificadores"]):
+    #         _ = setRecord(self.tblObjName(), fldID=self.outerObject.recordID, fldIdentificadores=identifs)
+    #
+    #     # 2. Creates assignTag Activity for Animal: Updates tblRA, tblLink, tblData
+    #
+    #     # tblLink: 1 record per Animal being operated on (1 in this case).
+    #     # tblData: 1 record per tag being assigned. MULTIPLE RECORDS in this case.
+    #     # Updates tblDataAnimalesCaravanas: 1 row per tag assigned to the Animal.Same idActividadRA from assign Activity
+    #     for t in self.outerObject._tags_read:
+    #         dfData.loc[len(dfData.index), 'fldFK_Caravana', 'fldComment'] = \
+    #             [t.ID, f'Actividad: {activityName}. Tag ID: {t.tagNumber} / {t.ID}.']
+    #         # Setea datos de tag en tbl del outerObject al que se asigna la Caravana
+    #     idActividadRA = self._createActivityRA(dfRA, dfLink, dfData)
+    #     if isinstance(idActividadRA, str):
+    #         retValue = f'ERR_DBAccess: Cannot read table {dfRA.db.tbl_name}'
+    #         krnl_logger.error(retValue, stack_info=True, exc_info=True)
+    #         return retValue
+    #     retValue = idActividadRA
+    #     return retValue
+
+
+    # @Activity.activity_tasks(after=(Activity.doInventory,))  NO hacer inventory aqui. Se confunden las actividades
+    # por haber solo una actividad de Caravaneo implementada como Actividad.
+    def deassignTags(self, *args: pd.DataFrame, tag_list=None, **kwargs):         # Caravaneo - Desasignar (ID=71)
+        # 04Aug24: Implements iterator management for obj_dataframe()
         """
-        DeAssigns Tags in *args from Animal. if Status for deassigned Tags is not specified, status=Decomisionada.
+        Deassigns Tags from Animal. if Status for deassigned Tags is not specified, status=Decomisionada.
         @param args: Tags array to assign to Animal
-        @param kwargs: tags=[Tag]. Tag Objects to deassign (1 or more)
-                       tagStatus=val -> Value to set on 'deassigned' tags. val must be in progActivitiesPermittedStatus.
-                       Default: 'Baja'
+        @param tag_list: Tag objects to deassign from tagged object.
+        @param kwargs: tagStatus=val -> Value to set on 'deassigned' tags. val must be in activitiesPermittedStatus.
+                       Default: 'Decomisionada'
         @return:
         """
-        activityName = 'Caravaneo - Desasignar'
-        wrtTables = []
-
-        tags = kwargs.get('tags', [])
+        activityName = 'Caravaneo - Desasignar'         # Defined in db but not implemented as an Activity class.
+        kwargs['activity_name'] = activityName
+        tags = tag_list or []
         if not self._isValid or not self.outerObject.validateActivity(activityName):
             retValue = f'ERR_Sys_ObjectNotValid or ActivityNotValid - {callerFunction()}()'
             print(f'{moduleName()}({lineNum()}) - {retValue}')
-            # self.outerObject = None  # Removes object from list. Enables recursion/reentry.
             return retValue
 
-        tags = tags if hasattr(tags, '__iter__') else list(tags)
+        tags = tags if hasattr(tags, '__iter__') and not isinstance(tags, str) else list((tags, ))
         tags = [j for j in tags if isinstance(j, Tag)]
         if tags:
-            tblRA = setupArgs(self._tblRAName, *args)
-            tblLink = setupArgs(self._tblLinkName, *args)
-            tblData = setupArgs(self._tblDataName, *args)
-            activityID = tblRA.getVal(0, 'fldFK_NombreActividad') or self._activityID
-            tblRA.setVal(0, fldFK_NombreActividad=activityID)
-            # reqStatus = next((j for j in kwargs if str(j).lower().__contains__('tagstatus') and
-            #                  str(kwargs[j]).lower() in ('decomisionada', 'reemplazada')), 'Baja')
-            retValue = None
-            timeStamp = time_mt('datetime')
-            eventDate = timeStamp
-            userID = sessionActiveUser
-            tblRA.setVal(0, fldFK_NombreActividad=activityID, fldTimeStamp=timeStamp, fldFK_UserID=userID)
-            idActividadRA = setRecord(tblRA.tblName, **tblRA.unpackItem(0))
+            dfRA, dfLink, dfData = self.set3frames(dfRA_name=self._tblRAName, dfLink_name=self._tblLinkName,
+                                                   dfData_name=self.tblDataName())
+            time_now = time_mt('dt')  # Discards dates in the future for timeStamp, eventDate.
+            timeStamp = min(dfRA.loc[0, 'fldTimeStamp'] if not dfRA.empty and 'fldTimeStamp' in dfRA and
+                                                        pd.notnull(dfRA.loc[0, 'fldTimeStamp']) else time_now, time_now)
+            date = dfData.loc[0, 'fldDate'] if not dfData.empty and 'fldDate' in dfData and \
+                                               pd.notnull(dfData.loc[0, 'fldDate']) else None
+            eventDate = min(getEventDate(tblDate=date, defaultVal=timeStamp, **kwargs), timeStamp)
+            dfData.reset_index()
+            dfData.loc[0, 'fldDate'] = eventDate
+            for idx, t in enumerate(tags):
+                # dfData MUST BE EMPTY for this to work.
+                # if pd.isnull(dfData.iloc[idx, dfData.columns.get_loc('fldFK_Caravana')]):
+                dfData.iloc[idx, dfData.columns.get_loc('fldFK_Caravana')] = t.ID    # Multiple records in tblData.
+
+            idActividadRA = self._createActivityRA(dfRA, dfLink, dfData)
             if isinstance(idActividadRA, str):
-                retValue = f'ERR_DB_WriteError - Func/Method: MyTags.assignTags()'
+                retValue = f'ERR_DB_Access - Func/Method: TagActivity.deassign()'
                 krnl_logger.error(retValue)
-                print(f'{moduleName()}({lineNum()})  - {retValue}', dismiss_print=DISMISS_PRINT)
-                # self.outerObject = None  # Removes object from list. Enables recursion/reentry.
                 return retValue
-            # Setea valores en tabla Link
-            tblLink.setVal(0, fldFK_Actividad=idActividadRA, fldFK=self.outerObject.ID,
-                           fldComment=f'Activity: {activityName}')
-            tblLink.undoOnError = True  # Se deben deshacer escrituras previas si falla escritura
-            wrtTables.append(tblLink)
 
+            initial_identifs = self.outerObject.getIdentifiers()
             for t in tags:
-                if isinstance(t, Tag):
-                    self.outerObject.popMyTags(t)           # retira el Tag del Diccionario __myTags
-                    self.outerObject.removeIdentifer(t.ID)    # quita de self.__identifiers y del record en Animales.
-                    t.commission.unset(**kwargs)    # Decomisiona tag y Setea status
-                    tblData.appendRecord(fldFK_Actividad=idActividadRA, fldDate=eventDate, fldFK_Caravana=t.ID,
-                        fldComment=tblData.getVal(0, 'fldComment', '')+f'{activityName}. Tag ID:{[t.ID for t in tags]}')
+                self.outerObject.popMyTags(t)           # retira el Tag del Diccionario __myTags
+                tag_status = kwargs.get('status', '') or 'Decomisionada'
+                t.commission.unset(status=tag_status, date=eventDate, **kwargs)  # this ain't an Inventory Activity.
 
+            new_identifs = self.outerObject.getIdentifiers()        # This is a tuple.
+            if set(initial_identifs) != set(new_identifs):
+                _ = setRecord(self.tblObjName(), fldID=self.outerObject.recordID, fldIdentificadores=new_identifs)
+                self.outerObject._init_uid_dicts()  # Reloads object dataframe with new fldIdentificadores data.
 
-            wrtTables.append(tblData)
-            errorStr = None
-            if tblData.dataLen:
-                retValue = [j.setRecords() for j in wrtTables]    # Escribe Tablas
-            else:
-                errorStr = f'ERR_INP_Empty tag string. {moduleName()}({lineNum()}) - {callerFunction()}'
-                krnl_logger.info(errorStr)
-                print(f'{errorStr}', dismiss_print=DISMISS_PRINT)
-            # Si hay error de escritura en tblLink o tblData, hace undo de tblRA y sale con error.
-            if any(val in (0, None) for val in retValue) or errorStr:
-                if tblRA.getVal(0, 'fldID') is None:
-                    _ = delRecord(tblRA.tblName, idActividadRA)
-                retValue = f'ERR_DB_WriteError - Function/Method: deassignTags()'
-                krnl_logger.error(f'{moduleName()}({lineNum()}) - {retValue} - '
-                                  f'Deleting record {idActividadRA} / Table: {tblRA.tblName}')
-                print(f'{moduleName()}({lineNum()}) - {retValue}', dismiss_print=DISMISS_PRINT)
-                print(f'Deleting record {idActividadRA} / Table: {tblRA.tblName}', dismiss_print=DISMISS_PRINT)
-            else:
-                retValue = idActividadRA
-                if self._doInventory(**kwargs):
-                    self.outerObject.inventory.set()
+            retValue = idActividadRA
             return retValue
+
+        return None
+
+
+    # def deassignTags01(self, *args: pd.DataFrame, tag_list=None, **kwargs):         # Caravaneo - Desasignar (ID=71)
+    #     """
+    #     Deassigns Tags from Animal. if Status for deassigned Tags is not specified, status=Decomisionada.
+    #     @param args: Tags array to assign to Animal
+    #     @param tag_list: Tag objects to deassign from tagged object.
+    #     @param kwargs: tagStatus=val -> Value to set on 'deassigned' tags. val must be in activitiesPermittedStatus.
+    #                    Default: 'Decomisionada'
+    #     @return:
+    #     """
+    #     activityName = 'Caravaneo - Desasignar'         # Defined in db but not implemented as an Activity class.
+    #     kwargs['activity_name'] = activityName
+    #     tags = tag_list or []
+    #     if not self._isValid or not self.outerObject.validateActivity(activityName):
+    #         retValue = f'ERR_Sys_ObjectNotValid or ActivityNotValid - {callerFunction()}()'
+    #         print(f'{moduleName()}({lineNum()}) - {retValue}')
+    #         return retValue
+    #
+    #     tags = tags if hasattr(tags, '__iter__') else list(tags)
+    #     tags = [j for j in tags if isinstance(j, Tag)]
+    #     if tags:
+    #         dfRA = next((j for j in args if isinstance(j, pd.DataFrame) and j.db.tbl_name == self._tblRAName),
+    #                     pd.DataFrame.db.create(self._tblRAName))
+    #         dfLink = next((j for j in args if isinstance(j, pd.DataFrame) and j.db.tbl_name == self._tblLinkName),
+    #                       pd.DataFrame.db.create(self._tblLinkName))
+    #         dfData = next((j for j in args if isinstance(j, pd.DataFrame) and j.db.tbl_name == self.tblDataName()),
+    #                       pd.DataFrame.db.create(self.tblDataName()))
+    #         time_now = time_mt('dt')  # Discards dates in the future for timeStamp, eventDate.
+    #         timeStamp = min(dfRA.loc[0, 'fldTimeStamp'] or time_now, time_now)
+    #         eventDate = min(getEventDate(tblDate=dfData.loc[0, 'fldDate'], defaultVal=timeStamp, **kwargs), timeStamp)
+    #         dfData.loc[0, 'fldDate'] = eventDate
+    #
+    #         for idx, t in enumerate(tags):
+    #             if pd.isnull(dfData.iloc[idx, 'fldFK_Caravana']):
+    #                 dfData.iloc[idx, 'fldFK_Caravana'] = t.ID         # Multiple records in tblData.
+    #
+    #         idActividadRA = self._createActivityRA(dfRA, dfLink, dfData)
+    #         if isinstance(idActividadRA, str):
+    #             retValue = f'ERR_DB_Access - Func/Method: TagActivity.deassign()'
+    #             krnl_logger.error(retValue)
+    #             return retValue
+    #
+    #         for t in tags:
+    #             if isinstance(t, Tag):
+    #                 self.outerObject.popMyTags(t)           # retira el Tag del Diccionario __myTags
+    #                 tag_status = kwargs.get('status', '') or 'Decomisionada'
+    #                 t.commission.unset(status=tag_status, date=eventDate, **kwargs)  # this ain't an Inventory Activity.
+    #
+    #         retValue = idActividadRA
+    #         return retValue
+    #     return None
+
+
 
     @classmethod
     def isTagAssigned(cls, tag):           # cls is Bovine, Caprine, etc.
         """
-        Informs whether tag is assigned to an object of type cls (by returning the object tag is tied to).
-        If tag is not found in the first pass, reloads ALL tags for all objects from db to account for potential
-        database updates due to replication.
+        Informs whether tag is assigned to an object of type cls, by assembling a Tag identifier that includes cls.
+        Uses that identifer to search tag in the Tag._identifiers_dict. Returns the status of that tag if found.
         @param tag: tagNumber, Tag UID (str) or Tag object.
-        @return: object is tag is assigned to an object. None if tag is not assigned or doesn't exist
-        CAUTION: Object may be an object of class cls or a different class as under certain circumstances Tag objects
-        are pulled from Tag __registerDict.
+        @return: True: Tag is assigned to object of class cls; False: Tag is available; None: Tag not found.
         """
-        tagID = None
         if isinstance(tag, str):
+            tagID = None
             try:
-                tagID = UUID(tag).hex
+                tagID = uuid.UUID(tag).hex
             except (SyntaxError, TypeError, AttributeError, ValueError):
-                tagObj = Tag.tagFromNum(tag)
+                # Tag passed as a tag number. Must create tag identifier
+                identifier = Tag.create_identifier(elements=(tag.strip(), Tag._tagIdentifierChar, cls.__name__))
+                for df in cls._myTagClass().obj_dataframe():        # _myTagClass is TagBovine, TagCaprine, etc.
+                    try:
+                        tagID = df.loc[df['fldIdentificadores'].isin([identifier]), 'fldObjectUID'].iloc[0]
+                        break
+                    except IndexError:
+                        continue
+            if tagID:
+                # A valid Tag uid here or None: creates Tag object or returns None.
+                tagObj = Tag.getObject(tagID)
             else:
-                tagObj = next((o for o in Tag.getRegisterDict().values() if o.ID == tagID), None)
+                tagObj = None
+
         elif isinstance(tag, Tag):
             tagObj = tag
         else:
             tagObj = None
 
         if tagObj:
-            return tagObj.isAssigned()
-
-        # Reloads tags for all cls Objects from database.
-        if not tagID:
-            tagID = next((k for k in Tag.getRegisterDict() if Tag.getRegisterDict()[k].tagNumber == removeAccents(tag)),
-                         None)
-            if not tagID:
-                return None
-
-        obj = None
-        for o in cls.getRegisterDict():  # This loop can take a while to run...
-            o.initializeTags()
-            if tagID in o.myTagIDs:
-                obj = o
-                # don't break here!. Allow for initializeTags() to run for ALL objects in registerDict, to update all.
-        return obj
-
+            return not tagObj.isAvailable       # True: Assigned / False: Not assigned.
+        return None
 
 
 #  TODO(cmt): Esta clase NO DEBE SER singleton: Se crea un objeto por cada Actividad Programada definida para Animales.
@@ -1731,8 +2089,16 @@ class ProgActivityAnimal(ProgActivity):
     __paRegisterDict = {}  # {self: ActivityID} Register de las Actividades Programadas ACTIVAS de class AnimalActivity
     __triggerRegisterDict = {}  # {idTrigger: triggerObj}. 1 triggerRegisterDict para todas las ProgActivities.
 
+    @classmethod
+    def tblDataName(cls):
+        return cls.__tblDataName
+
+    @classmethod
+    def getActivityName(cls):
+        return cls.__activityName
+
     # List of activities with ProgActivity defined and supported. Used in recordActivity() method.
-    __paDict = AnimalActivity.getSupportPADict()         # {ActivityName: __activityID, } con getSupportPADict=True
+    __paDict = AnimalActivity.getSupportsPADict()         # {ActivityName: __activityID, } con getSupportsPADict=True
 
     @classmethod
     def progActivitiesDict(cls):
@@ -1818,15 +2184,15 @@ class ProgActivityAnimal(ProgActivity):
         _ = [cls.paRegisterActivity(j) for j in objList]  # {paObj: __activityID, } Registers objects in class dict.
         return bool(_)
 
-    @classmethod
-    def loadFromDB00(cls):
-        objList = super().loadFromDB()
-        if isinstance(objList, str):
-            krnl_logger.error(
-                f'ERR_DB_Access Error: Programmed Activities for class {cls.__name__} not loaded: {objList}')
-            return f'ERR_DB_Access Error: Programmed Activities for class {cls.__name__} not loaded: {objList}'
-        _ = [cls.paRegisterActivity(j) for j in objList]  # {paObj: __activityID, } Registers objects in class dict.
-        return bool(_)
+    # @classmethod
+    # def loadFromDB00(cls):
+    #     objList = super().loadFromDB()
+    #     if isinstance(objList, str):
+    #         krnl_logger.error(
+    #             f'ERR_DB_Access Error: Programmed Activities for class {cls.__name__} not loaded: {objList}')
+    #         return f'ERR_DB_Access Error: Programmed Activities for class {cls.__name__} not loaded: {objList}'
+    #     _ = [cls.paRegisterActivity(j) for j in objList]  # {paObj: __activityID, } Registers objects in class dict.
+    #     return bool(_)
 
 
     def updateStatus(self, status=None, *args, **kwargs):
@@ -1854,7 +2220,15 @@ class PersonActivityAnimal(AnimalActivity):
     __tblDataName = 'tblDataAnimalesActividadPersonas'
     __activityName = 'Personas'
     __method_name = 'person'
-    _short_name = 'person'  # Used by Activity._paCreate(), Activity.__isClosingActivity()
+    _short_name = 'person'                  # Used by Activity._paCreate(), Activity.__isClosingActivity()
+
+    @classmethod
+    def tblDataName(cls):
+        return cls.__tblDataName
+
+    @classmethod
+    def getActivityName(cls):
+        return cls.__activityName
 
     def __init__(self, *args, **kwargs):
         isValid = True
@@ -1864,37 +2238,23 @@ class PersonActivityAnimal(AnimalActivity):
         kwargs['decorator'] = self.__method_name
         super().__init__(self.__activityName, *args, tbl_data_name=self.__tblDataName, **kwargs)
 
-        self.__tblRA = setupArgs(self._tblRAName, *args)  # Tabla Registro De Actividades
-        self.__tblLink = DataTable(self._tblLinkName)  # Sin argumentos: se crean TODOS los campos de la tabla;
-        self.__tblData = DataTable(self._tblDataName)  # Data Inventario, Data Localizacion, etc.
-
     # @Activity.dynamic_attr_wrapper
-    def get(self, sDate='', eDate='', **kwargs):
+    def get(self, *args, activity_id=None, uid=None, **kwargs):
         """
-       Returns records in table Data Personas between sValue and eValue. If sValue = eValue = '' -> Last record
-       @param sDate: No args: Last Record; sDate=eDate='': Last Record;
-                       sDate='0' or eDate='0': First Record
-                       Otherwise: records between sDate and eDate
-       @param eDate: See @param sDate.
-       @param kwargs: mode=datatable->Returns DataTable with full record.  mode='fullRecord' -> Returns last Record,
-        in full.
-       @return: Object DataTable with information from [Data Animales Actividad Personas]
+        Returns records from [Data Animales Actividad Personas] table.
+        @param activity_id: int | list | tuple. ActivityID for activities to use as filters.
+        @param uid: uid | list | tuple. Object uids for which to pull data.
+       @return: DataFrame object with information.
        """
-        retValue = None
         if self._isValid and self.outerObject.validateActivity(self.__activityName):
-            qryTable = self._getRecordsLinkTables(self.__tblRA, self.__tblLink, self.__tblData)
-            if qryTable.dataLen:
-                if qryTable.dataLen <= 1:
-                    retValue = qryTable  # qryTable tiene 1 solo registro (Ultimo o Primero)
-                else:
-                    retTable = qryTable.getIntervalRecords('fldDate', sDate, eDate, 1)  # mode=1: Date field.
-                    retValue = retTable
-        # self.outerObject = None  # Removes object from list. Enables recursion/reentry.
-        return retValue
+            activity_list = (activity_id,) if isinstance(activity_id, int) else activity_id
+            return self._get_link_records(activity_list=activity_list, uid=uid)
+        return None
 
 
-    def set(self, *args: DataTable, **kwargs):
-        """
+
+    def set(self, *args: pd.DataFrame, person=None, execute_fields=None, excluded_fields=None, **kwargs):
+        """     # TODO 04Aug24: This function needs EXTENSIVE testing.
         Inserts ID_Persona obj_data for the object "obj" in the DB, along with ownership percentage over Object.
         __outerAttr: TagObject para la que se realiza la Actividad. Lo setea el metodo inventario().
         For convenience, can process multiple [Data Personas] tables with multiple records in each of the tables.
@@ -1903,7 +2263,8 @@ class PersonActivityAnimal(AnimalActivity):
         For this, high level functions MUST DEFINE ALL Persons and Percent so that total percentage = 100% for all
         set() operations. Must pass this information in DataTable form. set() will remove all previous owner records
         to inactive (OVERWRITE->fldFlag=0) and set the new records as Active, for a total of 100% ownership.
-        @param idPerson: ID_Persona, active in the system. Used when assigning only 1 person, with 100% ownership.
+        @param person:
+        @param person: (uid), ID active in the system. Used when assigning only 1 person, with 100% ownership.
         @param args: list of DataTable objects, with all the tables and fields to be written to DB. Used when
                 multiple persons are to be assigned to the obj Object.
                 No checks performed. The function will discard and ignore all non-valid arguments
@@ -1911,74 +2272,85 @@ class PersonActivityAnimal(AnimalActivity):
                        idPerson=(int) Assignes ID_Persona with 100% ownership (Simplified input)
         @return: ID_Actividad (Registro De Actividades, int) if success; errorCode (str) on error; None for nonValid
         """
-        # Checks to be performed by high level. All idPerson valid, active, level=1; Sum of % ownership=100%
-        tblData = setupArgs(self.__tblDataName, *args, **kwargs)
-        idPerson = next((kwargs[j] for j in kwargs if 'person' in str(j).lower()), None)
+        # TODO: Checks to be performed by high level-> All idPerson valid, active, level=1; Sum of % ownership=100%
+        dfRA, dfLink, dfData = self.set3frames(*args, dfRA_name=self._tblRAName, dfLink_name=self._tblLinkName,
+                                               dfData_name=self.__tblDataName)
+        if not dfData.empty:
+            idPerson = ()
+        elif isinstance(person, (list, tuple, set)):
+            idPerson = person
+        elif isinstance(person, str):
+            idPerson = (person, )
+        else:
+            raise ValueError(f'{self.__class__.__name__}.set(): ValueError. Invalid argument person.')
+
         if self._isValid and self.outerObject.validateActivity(self._activityName):
-            tblRA = setupArgs(self._tblRAName, *args)
-            tblLink = setupArgs(self._tblLinkName, *args)
-            idPersonDict = {}          # {ID Persona: fldPercentageOwnership, }
-            personRecords = DataTable(tblData.tblName)
-            activityID = self._activityID if tblRA.getVal(0, 'fldFK_NombreActividad') is None \
-                else tblRA.getVal(0, 'fldFK_NombreActividad')
-            tblRA.setVal(0, fldFK_NombreActividad=activityID)
+            idPersonPercent = {}          # {Person uid: fldPercentageOwnership, }
+            activityID = dfRA.loc[0, 'fldFK_NombreActividad'] if not dfRA.empty and 'fldFK_NombreActividad' in dfRA.columns else None
+            if pd.isnull(activityID):
+                activityID = self._activityID
+
+            dfRA.iloc[0, dfRA.columns.get_loc('fldFK_NombreActividad')] = activityID
             # Genera lista de owners originales del animal, existentes ANTES de asignar los owners de esta llamada.
             # SOLO filtrar por getID en temp0, NO usar ID_Actividad porque el seteo de ownership se puede
             # hacer con cualquier __activityID. Lo mismo aplica para cualquier otro filtro de este tipo.
-            temp0 = getRecords(tblLink.tblName, '', '', None, 'fldFK_Actividad', 'fldFK', fldFK=self.outerObject.ID)
-            objectActivitiesCol = temp0.getCol('fldFK_Actividad')
-            temp = getRecords(tblData.tblName, '', '', None, 'fldID', 'fldFK_Persona', 'fldPercentageOwnership',
-                              fldFlag=1, fldFK_Actividad=objectActivitiesCol)
-            print(f'BBBBRRRRRRRRRR! {moduleName()}({lineNum()}) - initialActiveRecords={temp.dataList}',
-                  dismiss_print=DISMISS_PRINT)
-            # percentageCol = temp.getCol('fldPercentageOwnership')
-            # initialOwnershipPercent = float(sum(percentageCol))
-            # print(f'BBBBRRRRRRRRRR! {moduleName()}({lineNum()}) percentCol: {percentageCol} / '
-            #       f'intialPercentage={initialOwnershipPercent}')
+            strwhr0 = f'WHERE "{getFldName(self._tblLinkName, "fldFK")}" == "{self.outerObject.ID}"'
+            ser0 = getrecords(self._tblLinkName, 'fldFK_Actividad', where_str=strwhr0)['fldFK_Actividad']
+            objectActivitiesCol = tuple(ser0.tolist())
+            objectActivities_str = str(objectActivitiesCol) if len(objectActivitiesCol) > 1 else \
+                str(objectActivitiesCol).replace(',', '')
+            strwhr1 = f'WHERE "{getFldName(self.__tblDataName, "fldFlag")}" == 1 ' + \
+                      f'AND "{getFldName(self.__tblDataName, "fldFK_Actividad")}" IN {objectActivities_str}' \
+                      if len(objectActivitiesCol) > 0 else ';'
+            dftemp = getrecords(self.__tblDataName, 'fldID', 'fldFK_Persona', 'fldPercentageOwnership',
+                                where_str=strwhr1)
 
-            if not args:
-                tblData.setVal(0, fldFK_Persona=idPerson, fldPercentageOwnership=1.0, fldFlag=1)
-                idPersonDict[idPerson] = 1.0     # 100% ownership
-                personRecords.appendRecord(**tblRA.unpackItem(0))
+            personRecords = pd.DataFrame.db.create(self.__tblDataName)
+            if dfData.empty:               # if not args:
+                for j, pers in enumerate(idPerson):        # p MUST BE A VALID Person uid.
+                    dfData.loc[j, ('fldFK_Persona', 'fldPercentageOwnership', 'fldFlag')] = (pers, 1.0, 1)
+                    idPersonPercent[idPerson] = 1.0     # 100% ownership
+                    personRecords.loc[len(personRecords.index)] = dfData.loc[j]
             else:
-                for t in args:
-                    if t.tblName == tblData.tblName and t.dataLen and len(t.dataList[0]) > 0:
-                        for j in range(t.dataLen):
-                            idPersonDict[t.getVal(j, 'fldFK_Persona')] = float(t.getVal(j, 'fldPercentageOwnership'))
-                            t.setVal(j, fldFlag=1)
-                            personRecords.appendRecord(**t.unpackItem(j))  # DataTable con info de Record de personas
+                for idx in dfData.index:
+                    personRecords.loc[len(personRecords.index)] = dfData.loc[idx]
+                    idPersonPercent[dfData.loc[idx, 'fldFK_Persona']] = float(dfData.loc[idx, 'fldPercentageOwnership'])
+                    dfData.loc[idx, 'fldFlag'] = 1        # Sets as active. Is it really needed??
 
-            print(f'BBBBRRRRRRRRRR! {moduleName()}({lineNum()}) personRecords={personRecords.dataList}',
+            print(f'PEERRRRRRRRRRSON! {moduleName()}({lineNum()}) personRecords={personRecords.to_dict()}',
                   dismiss_print=DISMISS_PRINT)
-            objPersonList = [Person.getRegisterDict()[i] for i in idPersonDict
-                                 if i in Person.getRegisterDict() and Person.getRegisterDict()[i].level == 1]
-            if objPersonList:
+            # objPersonList = [Person.getRegisterDict()[i] for i in idPersonPercent
+            #                      if i in Person.getRegisterDict() and Person.getRegisterDict()[i].level == 1]
+            objPersonList = []
+            for df in Person.obj_dataframe():       # TODO 04Aug24: IMPLEMENT DataFrames for Person class.
+                # objPersonList.append(df[df['fldObjectUID'].isin(list(idPersonPercent.keys()))]['fldObjectUID'].
+                #                      apply(Person.getObject).tolist()[0])
+                objPersonList.extend(df[df['fldObjectUID'].isin(list(idPersonPercent.keys()))]['fldObjectUID'].tolist())
+
+            if objPersonList:       # A list of Owners' uids.
+                # objPersonList = [Person.getObject(j) for j in objPersonList]
                 ownershipTotal = 0
-                for j in objPersonList:     # Chequea que % Ownership sea 100% para todos los owners validos
-                    ownershipTotal += next((idPersonDict[g] for g in idPersonDict if g == j.getID), 0)
+                ownershipTotal += sum([v for k, v in idPersonPercent.items() if k in objPersonList])
+                # Chequea que % Ownership sea 100% para todos los owners validos
                 if ownershipTotal != 1.00:
                     retValue = f'ERR_INP_InvalidArgument - {callerFunction()}: Total Percentage Ownership for ' \
                                f'Object {self.outerObject.getID} must equal 100%. Exiting...'
                     krnl_logger.info(retValue)
-                    # self.outerObject = None  # Removes object from list. Enables recursion/reentry.
-                    raise RuntimeError(f'{moduleName()}({lineNum()} - {retValue})')
+                    raise ValueError(f'{moduleName()}({lineNum()} - {retValue})')
 
-                print(f'BBBBRRRRRRRRRR! {moduleName()}({lineNum()}) Person(s): {objPersonList} - '
+                print(f'PEERRRRRRRRRRSON! {moduleName()}({lineNum()}) Person(s): {objPersonList} - '
                       f'TOTAL OWNERSHIP={ownershipTotal}', dismiss_print=DISMISS_PRINT)
-                newTblData = DataTable(tblData.tblName)
-                personIDCol = personRecords.getCol('fldFK_Persona')
-                for obj in objPersonList:
-                    for j in range(len(personIDCol)):
-                        if obj.ID == personIDCol[j]:
-                            newTblData.appendRecord(**personRecords.unpackItem(j))
-                print(f'BBBBRRRRRRRRRR! {moduleName()}({lineNum()}) newTblData={newTblData.dataList}',
+                personIDCol = personRecords['fldFK_Persona'].tolist()
+                dfData_new = pd.DataFrame.db.create(dfData.db.tbl_name, data=personRecords.to_dict())
+
+                print(f'PEERRRRRRRRRRSON! {moduleName()}({lineNum()}) newTblData={dfData_new.values}',
                       dismiss_print=DISMISS_PRINT)
-                if newTblData.dataLen:
-                    if temp.dataLen and temp.dataList[0]:
-                        for j in range(temp.dataLen):       # setea fldFlag=0 para los owners previos.
-                            temp.setVal(j, fldFlag=0)
-                        _ = tblData.setRecords()
-                    retValue = self._setPerson(tblRA, tblLink, newTblData)
+                if not dfData_new.empty:
+                    if not dftemp.empty:
+                        dftemp['fldFlag'] = 0       # setea fldFlag=0 para los owners previos.
+                    setrecords(dftemp)
+                    retValue = self._setPerson(dfRA, dfLink, dfData_new, execute_fields=execute_fields,
+                                               excluded_fields=excluded_fields)
                 else:
                     retValue = f'ERR_INP_PersonNotValid - {callerFunction()}. NO PERSON...'
                     print(f'{moduleName()}({lineNum()}) - {retValue}', dismiss_print=DISMISS_PRINT)
@@ -1988,8 +2360,108 @@ class PersonActivityAnimal(AnimalActivity):
         else:
             retValue = f'ERR_Sys_ObjectNotValid or ActivityNotDefined - {callerFunction()}. Person ID:{idPerson}'
             print(f'{moduleName()}({lineNum()} - {retValue}', dismiss_print=DISMISS_PRINT)
-        # self.outerObject = None  # Removes object from list. Enables recursion/reentry.
+
         return retValue
+
+
+
+    # def set00(self, *args: DataTable, execute_fields=None, excluded_fields=None, **kwargs):     # OUTDATED. DEPRECATE.
+    #     """
+    #     Inserts ID_Persona obj_data for the object "obj" in the DB, along with ownership percentage over Object.
+    #     __outerAttr: TagObject para la que se realiza la Actividad. Lo setea el metodo inventario().
+    #     For convenience, can process multiple [Data Personas] tables with multiple records in each of the tables.
+    #     To preserve consistency, a call to set() MUST DEFINE OWNERS FOR 100% of the object Ownership: Must set
+    #     to Inactive all previous ownership records for the Object and leave Active the newly inserted records.
+    #     For this, high level functions MUST DEFINE ALL Persons and Percent so that total percentage = 100% for all
+    #     set() operations. Must pass this information in DataTable form. set() will remove all previous owner records
+    #     to inactive (OVERWRITE->fldFlag=0) and set the new records as Active, for a total of 100% ownership.
+    #     @param idPerson: ID_Persona, active in the system. Used when assigning only 1 person, with 100% ownership.
+    #     @param args: list of DataTable objects, with all the tables and fields to be written to DB. Used when
+    #             multiple persons are to be assigned to the obj Object.
+    #             No checks performed. The function will discard and ignore all non-valid arguments
+    #     @param kwargs: Use to pass additional obj_data for table [Data Animales Actividad Personas]
+    #                    idPerson=(int) Assignes ID_Persona with 100% ownership (Simplified input)
+    #     @return: ID_Actividad (Registro De Actividades, int) if success; errorCode (str) on error; None for nonValid
+    #     """
+    #     # TODO: Checks to be performed by high level-> All idPerson valid, active, level=1; Sum of % ownership=100%
+    #     tblData = setupArgs(self.__tblDataName, *args, **kwargs)
+    #     idPerson = next((kwargs[j] for j in kwargs if 'person' in str(j).lower()), None)
+    #     if self._isValid and self.outerObject.validateActivity(self._activityName):
+    #         tblRA = setupArgs(self._tblRAName, *args)
+    #         tblLink = setupArgs(self._tblLinkName, *args)
+    #         idPersonDict = {}          # {ID Persona: fldPercentageOwnership, }
+    #         personRecords = DataTable(tblData.tblName)
+    #         activityID = self._activityID if tblRA.getVal(0, 'fldFK_NombreActividad') is None \
+    #             else tblRA.getVal(0, 'fldFK_NombreActividad')
+    #         tblRA.setVal(0, fldFK_NombreActividad=activityID)
+    #         # Genera lista de owners originales del animal, existentes ANTES de asignar los owners de esta llamada.
+    #         # SOLO filtrar por getID en temp0, NO usar ID_Actividad porque el seteo de ownership se puede
+    #         # hacer con cualquier __activityID. Lo mismo aplica para cualquier otro filtro de este tipo.
+    #         temp0 = getRecords(tblLink.tblName, '', '', None, 'fldFK_Actividad', 'fldFK', fldFK=self.outerObject.ID)
+    #         objectActivitiesCol = temp0.getCol('fldFK_Actividad')
+    #         temp = getRecords(tblData.tblName, '', '', None, 'fldID', 'fldFK_Persona', 'fldPercentageOwnership',
+    #                           fldFlag=1, fldFK_Actividad=objectActivitiesCol)
+    #         print(f'BBBBRRRRRRRRRR! {moduleName()}({lineNum()}) - initialActiveRecords={temp.dataList}',
+    #               dismiss_print=DISMISS_PRINT)
+    #         # percentageCol = temp.getCol('fldPercentageOwnership')
+    #         # initialOwnershipPercent = float(sum(percentageCol))
+    #         # print(f'BBBBRRRRRRRRRR! {moduleName()}({lineNum()}) percentCol: {percentageCol} / '
+    #         #       f'intialPercentage={initialOwnershipPercent}')
+    #
+    #         if not args:
+    #             tblData.setVal(0, fldFK_Persona=idPerson, fldPercentageOwnership=1.0, fldFlag=1)
+    #             idPersonDict[idPerson] = 1.0     # 100% ownership
+    #             personRecords.appendRecord(**tblRA.unpackItem(0))
+    #         else:
+    #             for t in args:
+    #                 if t.tblName == tblData.tblName and t.dataLen and len(t.dataList[0]) > 0:
+    #                     for j in range(t.dataLen):
+    #                         idPersonDict[t.getVal(j, 'fldFK_Persona')] = float(t.getVal(j, 'fldPercentageOwnership'))
+    #                         t.setVal(j, fldFlag=1)
+    #                         personRecords.appendRecord(**t.unpackItem(j))  # DataTable con info de Record de personas
+    #
+    #         print(f'BBBBRRRRRRRRRR! {moduleName()}({lineNum()}) personRecords={personRecords.dataList}',
+    #               dismiss_print=DISMISS_PRINT)
+    #         objPersonList = [Person.getRegisterDict()[i] for i in idPersonDict
+    #                              if i in Person.getRegisterDict() and Person.getRegisterDict()[i].level == 1]
+    #         if objPersonList:
+    #             ownershipTotal = 0
+    #             for j in objPersonList:     # Chequea que % Ownership sea 100% para todos los owners validos
+    #                 ownershipTotal += next((idPersonDict[g] for g in idPersonDict if g == j.getID), 0)
+    #             if ownershipTotal != 1.00:
+    #                 retValue = f'ERR_INP_InvalidArgument - {callerFunction()}: Total Percentage Ownership for ' \
+    #                            f'Object {self.outerObject.getID} must equal 100%. Exiting...'
+    #                 krnl_logger.info(retValue)
+    #                 # self.outerObject = None  # Removes object from list. Enables recursion/reentry.
+    #                 raise RuntimeError(f'{moduleName()}({lineNum()} - {retValue})')
+    #
+    #             print(f'BBBBRRRRRRRRRR! {moduleName()}({lineNum()}) Person(s): {objPersonList} - '
+    #                   f'TOTAL OWNERSHIP={ownershipTotal}', dismiss_print=DISMISS_PRINT)
+    #             newTblData = DataTable(tblData.tblName)
+    #             personIDCol = personRecords.getCol('fldFK_Persona')
+    #             for obj in objPersonList:
+    #                 for j in range(len(personIDCol)):
+    #                     if obj.ID == personIDCol[j]:
+    #                         newTblData.appendRecord(**personRecords.unpackItem(j))
+    #             print(f'BBBBRRRRRRRRRR! {moduleName()}({lineNum()}) newTblData={newTblData.dataList}',
+    #                   dismiss_print=DISMISS_PRINT)
+    #             if newTblData.dataLen:
+    #                 if temp.dataLen and temp.dataList[0]:
+    #                     for j in range(temp.dataLen):       # setea fldFlag=0 para los owners previos.
+    #                         temp.setVal(j, fldFlag=0)
+    #                     _ = tblData.setRecords()
+    #                 retValue = self._setPerson(tblRA, tblLink, newTblData, execute_fields, excluded_fields)
+    #             else:
+    #                 retValue = f'ERR_INP_PersonNotValid - {callerFunction()}. NO PERSON...'
+    #                 print(f'{moduleName()}({lineNum()}) - {retValue}', dismiss_print=DISMISS_PRINT)
+    #         else:
+    #             retValue = f'ERR_INP_PersonNotValid - {callerFunction()}. Person ID:{idPerson}'
+    #             print(f'{moduleName()}({lineNum()}) - {retValue}', dismiss_print=DISMISS_PRINT)
+    #     else:
+    #         retValue = f'ERR_Sys_ObjectNotValid or ActivityNotDefined - {callerFunction()}. Person ID:{idPerson}'
+    #         print(f'{moduleName()}({lineNum()} - {retValue}', dismiss_print=DISMISS_PRINT)
+    #     # self.outerObject = None  # Removes object from list. Enables recursion/reentry.
+    #     return retValue
 
     # @Activity.dynamic_attr_wrapper
     def getOwners(self):
@@ -2007,6 +2479,7 @@ class MaintenanceActivityAnimal(AnimalActivity):
     __tblDataName = 'tblAnimales'       # TODO: not sure which Data table to use here...
     __activityName = 'Mantenimiento'
     __method_name = 'maintenance'
+
     def __init__(self, *args, **kwargs):
         # Registers activity_name to prevent re-instantiation in GenericActivity.
         self.definedActivities()[self.__activityName] = self

@@ -16,10 +16,11 @@ def moduleName():
 
 class MoneyActivity(Activity):          # Abstract class
 
-    _activity_class_register = set()  # Used to create instance objects for each MoneyActivity subclass.
+    _activity_class_register = {}  # Used to create instance objects for each MoneyActivity subclass.
     _objClass = Amount
 
-    def __call__(self, caller_object=None, *args, **kwargs):
+
+    def __call__(self, caller_obj=None, *args, **kwargs):
         """
         @param caller_object: instance of Bovine, Caprine, etc., that invokes the Activity
         @param args:
@@ -28,7 +29,7 @@ class MoneyActivity(Activity):          # Abstract class
         """
         # item_obj=None above is important to allow to call fget() like that, without having to pass parameters.
         # print(f'>>>>>>>>>>>>>>>>>>>> {self} params - args: {(item_object, *args)}; kwargs: {kwargs}')
-        self.outerObject = caller_object  # item_object es instance de Animal, Tag, etc. NO PUEDE SER class por ahora.
+        self.outerObject = caller_obj  # caller_obj es instance de Animal, Tag, etc. NO PUEDE SER class por ahora.
         return self
 
 
@@ -672,8 +673,7 @@ money = MoneyHandler()      # money is a handler-object to execute all MoneyActi
 
 
 
-# TODO: Cuentas bancarias: ALIAS puede no tener puntos. identificar CBU SOLO un string de 22 digitos.
-#  Si no es string de 22 digitos decimales, considerar ALIAS.
+# TODO: Cuentas bancarias: ALIAS puede no tener puntos. Alias: 6 o mas caracteres. CBU: string de 22 digitos.
 
 # if not isinstance(uid, str):
 #     return 'ERROR'

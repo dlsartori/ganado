@@ -1,15 +1,24 @@
 import sys
-from PyQt6 import QtCore, QtWidgets
+from PyQt6 import QtCore, QtWidgets, QtGui
 # https://stackoverflow.com/questions/52560496/getting-a-second-window-pass-a-variable-to-the-main-ui-and-close
 from ui.IngresoAnimalesTabbed import Ui_dlgIngresoAnimales
-from krnl_custom_types import DataTable, getRecords, dbRead
+from ui_alta_caravanas import UiAltaCaravanas
+import krnl_db_query                    # Decorators for read_sql_query,
+from krnl_tag import Tag
+import pandas as pd
+import numpy as np
+from krnl_db_query import SQLiteQuery
+from krnl_custom_types import getRecords, getrecords
+from krnl_abstract_class_animal import Animal
+from krnl_bovine import Bovine
 from datetime import datetime, timedelta
+
+from krnl_custom_types import DataTable, getRecords, dbRead
 
 
 class UiAltaAnimales():
     def __init__(self, parent=None):
 
-        app = QtWidgets.QApplication(sys.argv)
         dlgAlta = DialogAltaAnimales()
         # app.setStyle('Windows')  # 'windowsvista', 'Windows', 'Fusion'
         if dlgAlta.exec() == QtWidgets.QDialog.DialogCode.Accepted:
@@ -42,6 +51,8 @@ class UiAltaAnimales():
             print('    blnPregn: ' + str(dlgAlta.blnPregn))
             print('    strComentario: ' + str(dlgAlta.strComentario))
             print('Tab 2:')
+            print('    lstCaravanasRight: ')
+            print(dlgAlta.lstCaravanasRight)
             print('Tab 3:')
             print('    qdtFechaNac: ' + str(dlgAlta.qdtFechaNac))
             print('    qdtFechaDestete: ' + str(dlgAlta.qdtFechaDestete))
@@ -86,37 +97,37 @@ class DialogAltaAnimales(QtWidgets.QDialog, Ui_dlgIngresoAnimales):
         self.currentField = None
         self.currentFieldUID = None
 
-        # create lists of values for combo boxes
-        self.lstTipoAlta = dbRead('tblAnimalesTiposDeAltaBaja',
-                    'SELECT "Nombre Tipo De AltaBaja", "ID_Tipo De AltaBaja" FROM "Animales Tipos De AltaBaja"'
-                    ' WHERE "AltaBaja" = "Alta" AND "GUI_Bitmask" & 1 ORDER BY "Nombre Tipo De AltaBaja"', 0).dataList
-        self.lstTipoAlta.insert(0, ['', None])
-        self.lstCategorias = dbRead('tblAnimalesCategorias',
-                    'SELECT "Nombre Categoria", "ID_Categoria" FROM "Animales Categorias" WHERE'
-                    ' "ID_Clase De Animal" = 1 AND "GUI_Bitmask" & 1 ORDER BY "Nombre Categoria"', 0).dataList
-        self.lstCategorias.insert(0, ['', None])
-        self.lstRazas = dbRead('tblAnimalesRazas',
-                    'SELECT "Nombre Raza", "ID_Raza" FROM "Animales Razas" WHERE'
-                    ' "ID_Clase De Animal" = 1 AND "GUI_Bitmask" & 1 ORDER BY "Nombre Raza"', 0).dataList
-        self.lstRazas.insert(0, ['', None])
-        self.lstEstablecimientos = dbRead('tblGeoEntidades',
-                    'SELECT "Nombre Entidad", "ID_GeoEntidad" FROM "Geo Entidades" WHERE'
-                    ' "ID_Nivel De Localizacion" = 40 AND "GUI_Bitmask" & 1 '
-                    ' ORDER BY "Nombre Entidad"', 0).dataList
-        self.lstEstablecimientos.insert(0, ['', None])
-        self.lstPersonasTemp = dbRead('tblPersonas',
-                    'SELECT "Apellidos", "Nombres / Razon Social", "ID_Persona" FROM "Personas" WHERE'
-                    ' "GUI_Bitmask" & 1 ORDER BY "Persona"', 0).dataList
+        # create lists of values
+        self.dfTemp = getrecords('tblAnimalesTiposDeAltaBaja','fldName', 'fldID')
+        self.lstTipoAlta = sorted(list(zip(self.dfTemp.fldName.values,  self.dfTemp.fldID.values)))
+        self.dfTemp = getrecords('tblAnimalesCategorias','fldName', 'fldID')
+        self.lstCategorias = sorted(list(zip(self.dfTemp.fldName.values,  self.dfTemp.fldID.values)))
+        self.dfTemp = getrecords('tblAnimalesRazas','fldName', 'fldID')
+        self.lstRazas = sorted(list(zip(self.dfTemp.fldName.values,  self.dfTemp.fldID.values)))
+        self.dfTemp = pd.read_sql_query('SELECT "Nombre Entidad", "ID_GeoEntidad" FROM "Geo Entidades" WHERE'
+                    ' "ID_Nivel De Localizacion" = 40'
+                    ' AND "GUI_Bitmask" = 1 ORDER BY "Nombre Entidad"', SQLiteQuery().conn)
+        self.lstEstablecimientos = sorted(list(zip(self.dfTemp.fldName.values, self.dfTemp.fldID.values)))
+        self.dfTemp = getrecords('tblPersonas','fldName', 'fldID')
+        self.lstPersonasTemp = sorted(list(zip(self.dfTemp.fldName.values,  self.dfTemp.fldID.values)))
+        self.lstPersonasTemp = getRecords('tblPersonas', '', '', None, 'fldLastName', 'fldName', 'fldID').dataList
         self.lstPersonas = []
         for itm in self.lstPersonasTemp:
-            if itm[2] == 1:
+            if itm[2] in (1, 4):
                 continue
             self.lstPersonas.append([itm[0] + ' ' + itm[1], itm[2]])
-        self.lstPersonas.insert(0, ['', None])
-        self.lstMarcas = dbRead('tblAnimalesMarcas',
-                    'SELECT "Nombre Marca", "ID_Marca" FROM "Animales Marcas" WHERE'
-                    ' "ID_Clase De Animal" = 1 AND "GUI_Bitmask" & 1 ORDER BY "Nombre Marca"', 0).dataList
-        self.lstMarcas.insert(0, ['', None])
+        self.dfTemp = getrecords('tblAnimalesMarcas','fldName', 'fldID')
+        self.lstMarcas = sorted(list(zip(self.dfTemp.fldName.values,  self.dfTemp.fldID.values)))
+        self.dfTemp = getrecords('tblCaravanas','fldTagNumber', 'fldID')
+
+        self.dftags = pd.read_sql_query(f'SELECT * FROM {Tag.tblObjDBName()};', SQLiteQuery().conn)
+        self.tags_taken = Tag.get_tags_in_use()
+        self.available_tags = self.dftags[~self.dftags.fldObjectUID.isin(self.tags_taken)]
+        self.tplCaravanasLeft = sorted(list(zip(self.available_tags.fldTagNumber.values,  self.available_tags.fldObjectUID.values)))
+        self.lstCaravanasLeft = [list(elem) for elem in self.tplCaravanasLeft]
+        self.tplCaravanasRight = []
+        self.lstCaravanasRight = []
+
 
         self.dspPeso.setValue(self.dblPeso)
         self.chkPreniez.setVisible(False)
@@ -130,28 +141,90 @@ class DialogAltaAnimales(QtWidgets.QDialog, Ui_dlgIngresoAnimales):
             self.cboRaza.addItem(item, intId)
         for item, intId in self.lstEstablecimientos:
             self.cboEstablecimiento.addItem(item, intId)
+        self.cboEstablecimiento.setCurrentIndex(1)
         for item, intId in self.lstPersonas:
             self.cboDuenio.addItem(item, intId)
         for item, intId in self.lstMarcas:
             self.cboMarca.addItem(item, intId)
-        self.cboLote.setEnabled(False)
-        self.cboPotrero.setEnabled(False)
-        self.cboLocacion.setEnabled(False)
+        self.establecimientoChanged()
+        self.loteChanged()
+
+        # format tables
+        self.tableWidgetLeft.setColumnCount(2)
+        self.tableWidgetLeft.setColumnHidden(1,True)
+        self.tableWidgetLeft.setColumnWidth(0, 265)
+        self.tableWidgetRight.setColumnCount(2)
+        self.tableWidgetRight.setColumnHidden(1,True)
+        self.tableWidgetRight.setColumnWidth(0, 265)
 
         # populate controls
         self.datNacimiento.setDate(self.qdtFechaNac)
         self.datDestete.setDate(self.qdtFechaDestete)
         self.datServicio.setDate(self.qdtFechaServ)
-
-        self.btnOk.clicked.connect(self.accept)
-        self.btnCancel.clicked.connect(self.reject)
+        self.updateTagTables()
 
         # signals & slots
         self.btnOk.clicked.connect(self.accept)
         self.btnCancel.clicked.connect(self.reject)
+        self.btnNewTag.clicked.connect(self.newTag)
         self.cboCategoria.currentIndexChanged.connect(self.categoriaChanged)
         self.cboEstablecimiento.currentIndexChanged.connect(self.establecimientoChanged)
         self.cboLote.currentIndexChanged.connect(self.loteChanged)
+        self.btnToRight.clicked.connect(self.toRight)
+        self.btnToLeft.clicked.connect(self.toLeft)
+
+
+    def newTag(self):
+        try:
+            tag = UiAltaCaravanas()
+        except (RuntimeError, Exception):
+            tag = None
+        if tag is not None:
+            mytag = tag.tag_obj
+            tagNum = mytag.tagNumber
+            tagID = mytag.ID
+            self.lstCaravanasRight.append([tagNum, tagID])
+            self.updateTagTables()
+
+
+    def updateTagTables(self):
+        self.tableWidgetLeft.setRowCount(len(self.lstCaravanasLeft))
+        self.tableWidgetRight.setRowCount(len(self.lstCaravanasRight))
+        for i, (name, code) in enumerate(self.lstCaravanasLeft):
+            item_name = QtWidgets.QTableWidgetItem(name)
+            item_code = QtWidgets.QTableWidgetItem(code)
+            self.tableWidgetLeft.setItem(i, 0, item_name)
+            self.tableWidgetLeft.setItem(i, 1, item_code)
+        for i, (name, code) in enumerate(self.lstCaravanasRight):
+            item_name = QtWidgets.QTableWidgetItem(name)
+            item_code = QtWidgets.QTableWidgetItem(code)
+            self.tableWidgetRight.setItem(i, 0, item_name)
+            self.tableWidgetRight.setItem(i, 1, item_code)
+
+
+    def toRight(self):
+        for itm in self.tableWidgetLeft.selectedItems():
+            print(self.tableWidgetLeft.item(itm.row(), 0).text(), self.tableWidgetLeft.item(itm.row(), 1).text())
+            tagNum = self.tableWidgetLeft.item(itm.row(), 0).text()
+            tagID = self.tableWidgetLeft.item(itm.row(), 1).text()
+            self.lstCaravanasLeft = [itm for itm in self.lstCaravanasLeft if itm[1] != tagID]
+            self.lstCaravanasRight.append([tagNum, tagID])
+            self.lstCaravanasRight.sort()
+        self.updateTagTables()
+        self.tableWidgetLeft.clearSelection()
+
+
+    def toLeft(self):
+        for itm in self.tableWidgetRight.selectedItems():
+            print(self.tableWidgetRight.item(itm.row(), 0).text(), self.tableWidgetRight.item(itm.row(), 1).text())
+            tagNum = self.tableWidgetRight.item(itm.row(), 0).text()
+            tagID = self.tableWidgetRight.item(itm.row(), 1).text()
+            self.lstCaravanasRight = [itm for itm in self.lstCaravanasRight if itm[1] != tagID]
+            self.lstCaravanasLeft.append([tagNum, tagID])
+            self.lstCaravanasLeft.sort()
+        self.updateTagTables()
+        self.tableWidgetRight.clearSelection()
+
 
     def categoriaChanged(self):
         if self.cboCategoria.currentData() in [2, 3, 4]:
@@ -159,17 +232,17 @@ class DialogAltaAnimales(QtWidgets.QDialog, Ui_dlgIngresoAnimales):
         else:
             self.chkPreniez.setVisible(False)
 
+
     def establecimientoChanged(self):
         self.currentFarm = self.cboEstablecimiento.currentData()
         self.lstLotes = []
         if self.currentFarm:
-            self.currentFarmUID = dbRead('tblGeoEntidades',
-                                         f'SELECT "UID_Objeto" FROM "Geo Entidades" WHERE "ID_GeoEntidad" = {self.currentFarm}',
-                                         0).dataList[0][0]
-            self.lstLotes = dbRead('tblGeoEntidades',
-                                   f'SELECT "Nombre Entidad", "ID_GeoEntidad" FROM "Geo Entidades"'
+            self.dfTemp = pd.read_sql_query(f'SELECT "UID_Objeto" FROM "Geo Entidades" WHERE "ID_GeoEntidad" = {self.currentFarm}', SQLiteQuery().conn)
+            self.currentFarmUID = list(zip(self.dfTemp.fldObjectUID.values))[0][0]
+            self.dfTemp = pd.read_sql_query(f'SELECT "Nombre Entidad", "ID_GeoEntidad" FROM "Geo Entidades"'
                                    f' WHERE "ID_Nivel De Localizacion" = 50 AND "Containers" LIKE "%{self.currentFarmUID}%"'
-                                   f' ORDER BY "Nombre Entidad"', 0).dataList
+                                   f' AND "GUI_Bitmask" = 1 ORDER BY "Nombre Entidad"', SQLiteQuery().conn)
+            self.lstLotes = sorted(list(zip(self.dfTemp.fldName.values,  self.dfTemp.fldID.values)))
 
         # populate combo box
         self.cboLote.clear()
@@ -196,18 +269,17 @@ class DialogAltaAnimales(QtWidgets.QDialog, Ui_dlgIngresoAnimales):
         self.cboLocacion.setEnabled(False)
         if self.currentField:
             self.cboPotrero.clear()
-            self.currentFieldUID = dbRead('tblGeoEntidades',
-                                         f'SELECT "UID_Objeto" FROM "Geo Entidades" WHERE "ID_GeoEntidad" = {self.currentField}',
-                                         0).dataList[0][0]
+            self.dfTemp = pd.read_sql_query(f'SELECT "UID_Objeto" FROM "Geo Entidades" WHERE "ID_GeoEntidad" = {self.currentField}', SQLiteQuery().conn)
+            self.currentFieldUID = list(zip(self.dfTemp.fldObjectUID.values))[0][0]
             # create lists of values for combo boxes
-            self.lstPotreros = dbRead('tblGeoEntidades',
-                                   f'SELECT "Nombre Entidad", "ID_GeoEntidad" FROM "Geo Entidades"'
+            self.dfTemp = pd.read_sql_query(f'SELECT "Nombre Entidad", "ID_GeoEntidad" FROM "Geo Entidades"'
                                    f' WHERE "ID_Nivel De Localizacion" = 60 AND "Containers" LIKE "%{self.currentFieldUID}%"'
-                                   f' ORDER BY "Nombre Entidad"', 0).dataList
-            self.lstLocaciones = dbRead('tblGeoEntidades',
-                                   f'SELECT "Nombre Entidad", "ID_GeoEntidad" FROM "Geo Entidades"'
+                                   f' AND "GUI_Bitmask" = 1 ORDER BY "Nombre Entidad"', SQLiteQuery().conn)
+            self.lstPotreros = sorted(list(zip(self.dfTemp.fldName.values, self.dfTemp.fldID.values)))
+            self.dfTemp = pd.read_sql_query(f'SELECT "Nombre Entidad", "ID_GeoEntidad" FROM "Geo Entidades"'
                                    f' WHERE "ID_Nivel De Localizacion" = 70 AND "Containers" LIKE "%{self.currentFieldUID}%"'
-                                   f' ORDER BY "Nombre Entidad"', 0).dataList
+                                   f' AND "GUI_Bitmask" = 1 ORDER BY "Nombre Entidad"', SQLiteQuery().conn)
+            self.lstLocaciones = sorted(list(zip(self.dfTemp.fldName.values, self.dfTemp.fldID.values)))
             # populate combo boxes
             if self.lstPotreros == []:
                 self.cboPotrero.clear()
@@ -229,5 +301,6 @@ class DialogAltaAnimales(QtWidgets.QDialog, Ui_dlgIngresoAnimales):
 
 
 if __name__ == '__main__':
+    app = QtWidgets.QApplication(sys.argv)
     alta = UiAltaAnimales()
     del alta

@@ -1,7 +1,8 @@
+import os
 from krnl_config import krnl_logger, print, DISMISS_PRINT, TERMINAL_ID
-from krnl_tm import *
+from krnl_custom_types import getRecords, DataTable, setupArgs, lineNum
 from krnl_abstract_class_animal import Animal
-from krnl_tag import Tag        # needed to initialize Tag.__registerDict.
+# from krnl_tag import Tag        # needed to initialize Tag.__registerDict.
 # from krnl_person import Person
 # from krnl_animal_factory import animalCreator
 
@@ -14,7 +15,7 @@ def moduleName():
 
 def loadItemsFromDB(cls, *, items=(), init_tags=False, **kwargs):
     """
-    Loads Animals of class cls from DB. Animal IDs provided in args. If no args, loads all animals.
+    Loads Animals, Person, Device of class cls from DB. Animal IDs provided in args. If no args, loads all animals.
     @param init_tags: Initialize Tags for objects.
     @param items: List of items (Object table ROWID values). If none passed. Loads all active items for cls.
     @param cls: Bovine, Caprine, Person, Tag, etc.   -> OJO!: Class Object, NOT str.
@@ -71,7 +72,6 @@ def loadItemsFromDB(cls, *, items=(), init_tags=False, **kwargs):
             RAP_col = tuple(RAPRecords.getCol('fldID'))
 
     for j in range(len(itemsList)):
-        # itemObj = animalCreator.object_creator(cls, **animalsTable.unpackItem(j)) # Esta tambien funciona bien
         itemObj = cls(**itemsTable.unpackItem(j))  # LLAMA a __init__(): Crea Animal Obj.
         if itemObj.isValid and not itemObj.exitYN:
             # itemObj.register()                  # Registra objecto en __registerDict.
@@ -102,18 +102,16 @@ def loadItemsFromDB(cls, *, items=(), init_tags=False, **kwargs):
 
             if init_tags and itemObj.__class__ in Animal.getAnimalClasses():
                 itemObj.tags.initializeTags()
-                itemObj.category.get()
-                # print(f'@@@@@@ {moduleName()} - bovine[{itemObj}] Category read from DB: {itemObj.category.get()}',
-                #       end=' -- ', dismiss_print=DISMISS_PRINT)
-                itemObj.category.compute()
-                print(f'After Category Update: {itemObj.category.get()}', dismiss_print=DISMISS_PRINT)
+                present_categ = itemObj.category.get(set_category=True)  # Returns computed, updated category value.
+                print(f'@@@@@@ loadItemsFromDB() - bovine[{j}] Updated Category: '
+                      f'{present_categ} / Tags: {itemObj.myTagNumbers}', dismiss_print=DISMISS_PRINT)
+                # computed = itemObj.category._compute(initial_category=itemObj.category.get())
 
             # itemObj.inventory.get(mode='value')
             # itemObj.status.get(mode='value')
             objList.append(itemObj)
         # if isinstance(itemObj, Animal):
         #     itemObj.updateTimeout_bkgd()            # NO hace falta esto. Solo para testear.
-
 
     print(f'------@@@@@@@------ {moduleName()}({lineNum()}) - Total {cls.__name__}s created: {len(items)} ----------\n',
           dismiss_print=DISMISS_PRINT)
@@ -216,7 +214,7 @@ def loadItemsFromDB(cls, *, items=(), init_tags=False, **kwargs):
 #                 itemObj.tags.initializeTags(tblRA_Desasignados)
 #                 print(f'@@@@@@ {moduleName()} - bovine[{itemObj}] Category read from DB: {itemObj.category.get()}',
 #                       end=' -- ', dismiss_print=DISMISS_PRINT)
-#                 itemObj.category.compute()
+#                 itemObj.category._compute(initial_category=itemObj.category.get())
 #                 print(f'After Category Update: {itemObj.category.get()}', dismiss_print=DISMISS_PRINT)
 #             # itemObj.inventory.get(mode='value')
 #             # itemObj.status.get(mode='value')
@@ -238,13 +236,13 @@ def reissueTags4Animal(animalClassName: str, tags=None, *args: DataTable, **kwar
     being tagged is assumed to have a record in the system already and has lost all its tags so identification
     is no longer possible.
     Mandatory MINIMUM args: Category, Animal class name, Tags. It's best to provide DOB, animalRace.
-    @param animalClassName: 'Bovino', 'Caprino', etc.
+    @param animalClassName: 'Bovine', 'Caprine', etc.
     @param tags: New tags for Animal
     @param args: DataTables with Animal obj_data
     @param kwargs:
     @return:
     """
-    if animalClassName == 'Vacuno':
+    if 'bovine' in animalClassName.lower():
         __validCategories = {2: 'Ternera', 3: 'Vaquillona', 4: 'Vaca', 5: 'Ternero', 6: 'Torito',
                              7: 'Novillito', 8: 'Novillo', 9: 'Toro', 11: 'Toro Reproductor', 12: 'Vaca CUT'}
     elif animalClassName == 'Caprino':

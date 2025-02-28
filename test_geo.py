@@ -1,42 +1,32 @@
-from krnl_tm import *
-from krnl_cfg import *
-from krnl_tag import *
 from krnl_abstract_class_animal import *
 from inspect import currentframe, getframeinfo
-from krnl_db_access import writeObj
 from krnl_geo import Geo
 
 
 if __name__ == '__main__':
-    sys.setswitchinterval(0.002)  # TODO: default=0.005. Vamo a ver como va...
-    print(f'switchinterval is set to {sys.getswitchinterval()} seconds.')
-    entity = 553            # Departamento 9 de Julio: 237 - El Nandu: 545 - El Nandu Lote 2, Potrero 1: 553
-    a = handlerGeo.getContainerEntities(entity, mode=1)
-    print(f'Container Entities for {entity}: {a}')
+
 
     # # Codigo creacion de Container Tree para cada registro en Geo Entidades
-    # temp = getRecords('tblGeoEntidades', '', '', None, '*')       # Codigo p/ setear campo Container Tree
+    temp = getRecords('tblGeoEntidades', '', '', None, '*')       # Codigo p/ setear campo Container Tree
     # for j in range(temp.dataLen):
     #     temp.setVal(j, fldContainerTree=handlerGeo.getContainerEntities(temp.getVal(j, 'fldID'), mode=1))
     #     setRecord('tblGeoEntidades', **temp.unpackItem(j))
 
-    # Creacion de Establecimiento
-    handlerGeo.createGeoEntity(fldFK_TipoDeEntidad=40, fldName='El Carioca V', fldAbbreviation='EC-5',
-                               fldFK_EntidadContainer=[237], fldFK_NivelDeLocalizacion=40)
-    # Creacion de Lote
-    handlerGeo.createGeoEntity(fldFK_TipoDeEntidad=50, fldName='El Carioca IV - Lote IX', fldAbbreviation='EC-4L9',
-                               fldFK_EntidadContainer=[554], fldFK_NivelDeLocalizacion=50, fldFK_Establecimiento=554)
-    # Creacion de Provincia
-    handlerGeo.createGeoEntity(fldFK_TipoDeEntidad=20, fldName='Provincia 31', fldAbbreviation='P-31',
-                               fldFK_EntidadContainer=10, fldFK_NivelDeLocalizacion=20)     #30 es error en fldFK_EntidadContainer
 
-    # Creacion de Pais Nuevo
-    handlerGeo.createGeoEntity(fldFK_TipoDeEntidad=10, fldName='Berretalandia', fldAbbreviation='BRTLND',
-                               fldFK_NivelDeLocalizacion=10)
-
-    writeObj.stop()
-
-
+    obj = Geo.getObject("El Ñandu - Lote 1", localiz_level=50)
+    # # Creacion de Establecimiento
+    # handlerGeo.createGeoEntity(fldFK_TipoDeEntidad=40, fldName='El Carioca V', fldAbbreviation='EC-5',
+    #                            fldFK_EntidadContainer=[237], fldFK_NivelDeLocalizacion=40)
+    # # Creacion de Lote
+    # handlerGeo.createGeoEntity(fldFK_TipoDeEntidad=50, fldName='El Carioca IV - Lote IX', fldAbbreviation='EC-4L9',
+    #                            fldFK_EntidadContainer=[554], fldFK_NivelDeLocalizacion=50, fldFK_Establecimiento=554)
+    # # Creacion de Provincia
+    # handlerGeo.createGeoEntity(fldFK_TipoDeEntidad=20, fldName='Provincia 31', fldAbbreviation='P-31',
+    #                            fldFK_EntidadContainer=10, fldFK_NivelDeLocalizacion=20)     #30 es error en fldFK_EntidadContainer
+    #
+    # # Creacion de Pais Nuevo
+    # handlerGeo.createGeoEntity(fldFK_TipoDeEntidad=10, fldName='Berretalandia', fldAbbreviation='BRTLND',
+    #                            fldFK_NivelDeLocalizacion=10)
 
     def algo(*args):
         argsParsed = []

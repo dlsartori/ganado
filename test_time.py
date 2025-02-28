@@ -3,7 +3,7 @@ from datetime import datetime
 from time import *
 from krnl_config import time_mt
 import inspect
-from krnl_sqlite import *
+from krnl_db_query import *
 import time
 # from time import clock_gettime, clock_settime, get_clock_info
 

@@ -2,17 +2,24 @@ import sys
 from datetime import datetime
 import inspect
 
-import time
-from time import sleep
-from krnl_cfg import *
 import functools
 from krnl_custom_types import DataTable
-from krnl_cfg import moduleName, callerFunction
+from krnl_config import singleton
 from operator import attrgetter
 from json import dump, dumps, loads, load
 import time
 
 if __name__ == '__main__':
+
+
+
+
+
+
+
+
+
+
 
 
 # ============================================================================================================ #
@@ -41,19 +48,19 @@ if __name__ == '__main__':
     # print(f'jsonList retrieved Dict (loads): {retrievedDict} /  type(retrievedList): {type(retrievedDict)}')
 # ============================================================================================================ #
 
-    print(f'\n                            Practicando con subsets...')
-    myList1 = [2, 3.8, 'Hola', (4, 5, 6), 4, 'A', 'B', 'C', ('A', 'B', 'C'), 'JuvDT']
-    subList1 = [2, 3.8, 'Hola', (4, 5, 6), 4, 'A', 'B', 'C', ('A', 'B', 'C'), 'JuvDT']
-    subList2 = [(4, 5, 6), 3.8, 4]
-    print(f'Lista: {myList1}')
-    print(f'{subList1} is subset: {set(subList1).issubset(set(myList1))}')
-    print(f'{subList2} is subset: {set(subList2).issubset(set(myList1))}')
-    print(f'Intersection: {set(myList1).intersection(subList2)}')
-    dict1 = {'a': 'a', 'b': 4, 'c': "HH"}
-    dict2 = {'hola': 'HOLA!', 'M': 55, 'rat': [2, 3, 'mm'], 'b': 'lopario', 'c': 95}
-
-    common = set(dict1).intersection(dict2)
-    print(f'common: {common}')
+    # print(f'\n                            Practicando con subsets...')
+    # myList1 = [2, 3.8, 'Hola', (4, 5, 6), 4, 'A', 'B', 'C', ('A', 'B', 'C'), 'JuvDT']
+    # subList1 = [2, 3.8, 'Hola', (4, 5, 6), 4, 'A', 'B', 'C', ('A', 'B', 'C'), 'JuvDT']
+    # subList2 = [(4, 5, 6), 3.8, 4]
+    # print(f'Lista: {myList1}')
+    # print(f'{subList1} is subset: {set(subList1).issubset(set(myList1))}')
+    # print(f'{subList2} is subset: {set(subList2).issubset(set(myList1))}')
+    # print(f'Intersection: {set(myList1).intersection(subList2)}')
+    # dict1 = {'a': 'a', 'b': 4, 'c': "HH"}
+    # dict2 = {'hola': 'HOLA!', 'M': 55, 'rat': [2, 3, 'mm'], 'b': 'lopario', 'c': 95}
+    #
+    # common = set(dict1).intersection(dict2)
+    # print(f'common: {common}')
 # =================================================================================================================
 
     # tblAnimal = DataTable('tblAnimales', fldDOB='2022-01-24 22:22:22:000000', fldFK_AnimalPadre='El Cornudo')
@@ -67,17 +74,17 @@ if __name__ == '__main__':
     # tablita1.setVal(0, fldMode='Dummy')
     # print(f'Columna Fecha: {tablita1.getCols("fldDate", "fldID")} / VALOR 0: {tablita1.getVal(0, "fldMode")}')
 
-    val = 4.5   #  'a String'        # OJO: Strings are iterable!!!
-    print(f'{val} es iterable?: {hasattr(val, "__iter__")}')
-
-    print(f"Is '' True or False??: {True if '' else False} / type(''): {type('')}")
-    print(f'Is "" True or False??: {True if "" else False}')
-
-    print(f'\n CHECK of inTypes() function: checks 1 object against several types')
-    types = 'asdf', DataTable, int, float
-    print(f'Is {val} (type: {type(val)}) in the Types [{types}]: {inTypes(val, types)}')
-
-    tableta = DataTable('tlbuasdf')
+    # val = 4.5   # 'a String'        # OJO: Strings are iterable!!!
+    # print(f'{val} es iterable?: {hasattr(val, "__iter__")}')
+    #
+    # print(f"Is '' True or False??: {True if '' else False} / type(''): {type('')}")
+    # print(f'Is "" True or False??: {True if "" else False}')
+    #
+    # print(f'\n CHECK of inTypes() function: checks 1 object against several types')
+    # types = 'asdf', DataTable, int, float
+    # print(f'Is {val} (type: {type(val)}) in the Types [{types}]: {inTypes(val, types)}')
+    #
+    # tableta = DataTable('tlbuasdf')
 
 # =====================================Pruebas con @decorators===================================================
 
@@ -131,8 +138,8 @@ if __name__ == '__main__':
     lowerSetting = 1
     defaultVal = 8888
     exactMatch = True
-    a = getArg(key, lower=lowerSetting, defaultVal=defaultVal, exact_match=exactMatch, **kwargs)
-    print(f'Values found: {key}: {a}')
+    # a = getArg(key, lower=lowerSetting, defaultVal=defaultVal, exact_match=exactMatch, **kwargs)
+    # print(f'Values found: {key}: {a}')
 
 
 # ===================================================== SETS ==================================================

@@ -1,8 +1,10 @@
-pyqt6
+pyqt6~=6.6.1
 psycopg2
-money
-ntplib
+money~=1.3.0
+ntplib~=0.4.0
 deepdiff
-requests
-peewee
+requests~=2.31.0
+peewee~=3.17.1
 setuptools
+pandas~=2.2.2
+numpy~=1.26.4

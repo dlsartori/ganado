@@ -1,20 +1,19 @@
-# from krnl_config import *
-import sqlite3
-from krnl_config import timerWrapper, bkgd_logger, connCreate, time_mt, print, DISMISS_PRINT, callerFunction, lineNum, \
+# import sqlite3
+from krnl_config import timerWrapper, bkgd_logger, fDateTime, time_mt, print, DISMISS_PRINT, callerFunction, lineNum, \
     USE_DAYS_MULT, MAIN_DB_NAME, os, VOID, SPD, DAYS_MULT, krnl_logger, fe_logger, ShutdownException, TERMINAL_ID
 from datetime import datetime, timedelta
 import threading
 from krnl_db_access import SqliteQueueDatabase
 from krnl_entityObject import EntityObject      # Uses ActivityCleanup() to cleanup outerAttr dict. on exiting threads.
 from krnl_abstract_base_classes import AbstractFactoryBaseClass
-from krnl_custom_types import DataTable, dbRead, DBTrigger
+from krnl_custom_types import DataTable, dbRead, DBTrigger, DifferedExecutionQueue
 from time import sleep
 # import functools
 # import dis                            # Modulo pseudo-desensamblador de codigo
 from threading import Thread, Timer, Event, Lock, RLock
 from krnl_async_buffer import AsyncBuffer, BufferAsyncCursor
 from krnl_abstract_class_animal import Animal
-from krnl_sqlite import SQLiteQuery
+from krnl_db_query import SQLiteQuery, db_main, __fldNameCounter
 
 
 RUNNING = object()
@@ -135,7 +134,7 @@ class IntervalTimer(Timer):
         if self.__queryObj is None:
             self.__queryObj = SQLiteQuery()  # Obj. de LECTURA: crea queryObj del Thread,lo registra en queryObjectsPool
         if self.__wrtObj is None:
-            self.__wrtObj = SqliteQueueDatabase(MAIN_DB_NAME, autostart=True)   # Objeto de ESCRITURA en  DB.
+            self.__wrtObj = SqliteQueueDatabase(db_name=MAIN_DB_NAME, autostart=True)   # Objeto de ESCRITURA en  DB.
         self.__threadName = threading.current_thread().name
         self.__threadID = threading.current_thread().ident  # Hay que inicializar aqui los parametros thread-specific
         self.__counter = 0
@@ -455,62 +454,11 @@ class IntervalFunctions(object):
                 'thread': self.thread, 'thread is running': self.thread.is_alive()}
 # ========================================== End IntervalFunctions ================================================ #
 
-# TODO: ALL THIS SHOULD BE DEPRECATED NOW MEMORY DATA IS NO LONGER USED (14-Dec-23)
-class DatabaseReplicationCursor(BufferAsyncCursor):
-    """ Implements the execution of methods that update memory data structures (last_inventory, last_category, etc.)
-    resulting from database replication updating the data replicated in the local db tables to the memory data
-    structures. This is done in a separate thread.
-    Decoupling all these db-intensive tasks from the front-end thread is the right way to go to free-up the front-end.
-    So all these activities are to be performed via AsyncBuffers and AsyncCursors.
-    These BufferAsyncCursor classes must implement, as a minimum, __init__(), format_item() and execute() methods.
-    """
-    _writes_to_db = MAIN_DB_NAME    # Flag to signal that the class uses db-write functions setRecord(), setRecords()
 
-    def __init__(self, *args, event=None, the_object=None, the_callable=None, **kwargs):
-        self._args = args       # Data for the object to be operated on (stored, bufferized, etc).
-        self._kwargs = kwargs
-        super().__init__(event=event, the_object=the_object, the_callable=the_callable)
-
-    @classmethod
-    def format_item(cls, *args, event=None, the_object=None, the_callable=None, **kwargs):
-        """ Item-specific method to put item on the AsyncBuffer queue. Called from AsyncBuffer.enqueue()
-        Standard interface: type(cursor)=cls -> valid cursor. None: Invalid object. Do not put in queue.
-        @param event: Event object created for the cursor/item to signal its results are ready for fetching.
-        @param args: All data to be appended (put) to the queue as a BufferAsyncCursor object.
-        @param kwargs: More data to be appended to the cursor.
-        @param the_object: the object for which the callable is called. Optional.
-        @param the_callable: callable to execute operations on the object. Optional.
-        """
-        if not the_callable:
-            return None
-        return cls(*args, event=event, the_object=the_object, the_callable=the_callable, **kwargs)   # returns cursor.
-
-    def execute(self):
-        if callable(self._callable):        # self._callable is _processDuplicates and _processReplicated (for now...)
-            # print(f'lalalalalalala execute {self.__class__.__qualname__}({lineNum()}): \n{self._callable}, '
-            #       f'object: {self._object}, args: {self._args}')
-            if hasattr(self._callable, "__self__"):
-                return self._callable(*self._args, **self._kwargs)  # self._callable comes already bound to self._object
-            if self._object:
-                return self._callable(self._object, *self._args, **self._kwargs)  # self._callable NOT bound to _object.
-
-        elif hasattr(self._callable, '__func__'):   # sometimes objects passed are not callable, but have a __func__
-            if hasattr(self._callable.__func__, "__self__"):
-                return self._callable.__func__(*self._args, **self._kwargs)
-            if self._object:
-                return self._callable.__func__(self._object, *self._args, **self._kwargs)  # __func__ NOT bound to _object.
-
-
-    def reset(self):
-        self._args = []
-        self._kwargs = {}
-
-# Creates async memory buffer. TODO: Final setting for thread_priority: > 15
-replicateBuffer = AsyncBuffer(DatabaseReplicationCursor, autostart=True, thread_priority=10, qsize_threshold=2,
+replicateBuffer = AsyncBuffer(DifferedExecutionQueue, autostart=True, thread_priority=10, qsize_threshold=2,
                               precedence=0)     # precedence=0 -> On exit, this queue stops LAST.
 
-# --------------------------------------------- End DatabaseReplicationCursor ------------------------------------- #
-
+# --------------------------------------------- End DifferedExecutionQueue ------------------------------------- #
 
 # Funciones que se lanzan en background, usando clase IntervalFunctions.
 # class IntervalFunctions EVITA RACE CONDITIONS entre funciones para que no se interrumpan entre ellas...
@@ -519,19 +467,27 @@ replicateBuffer = AsyncBuffer(DatabaseReplicationCursor, autostart=True, thread_
 def animalUpdates(*args, **kwargs):
     """ Updates Timeout and Category for Animals """
     retValue = 0
+    animalUpdates.counter += 1
     # 1. Update Categories and Timeout status for all Animals in the system
     for cls in Animal.getAnimalClasses():
         count1 = cls.updateTimeout_bkgd()  # retorna int:cantidad de obj. procesados por updtTmt_bkgd
-        # count2 = cls.updateCategories_bkgd()
+        count2 = cls.updateCategories_bkgd()
         if count1:
             retValue += count1   # count1, count2 son cantidades de objetos (animales) procesados por la llamada.
             cls.timeoutEvent().set()        # TODO(cmt): Signal para otros threads, notificando Timeout.
-        # if count2:
-        # retValue += count2  # count1, count2 son cantidades de objetos (animales) procesados por la llamada.
-        #     cls.categoryEvent().set()       # TODO(cmt): Signal para otros threads, notificando category change.
+        if count2:
+            retValue += count2  # count1, count2 son cantidades de objetos (animales) procesados por la llamada.
+            cls.categoryEvent().set()       # TODO(cmt): Signal para otros threads, notificando category change.
+
+        # if not animalUpdates.counter % 4:  # Tests reloading _sys_Fields,_sys_Tables from db in background.Works fine.
+        #     db_main.set_reloadFields()
+        #     db_main.set_reloadTables()
+
         # Prueba de acceso a DB desde bkgd thread
         # test_lectura = getRecords('tblCaravanas', '','', None, '*', fldFK_Color=6)
     return retValue
+animalUpdates.counter = 0
+
 
 def twiceADay(obj, *args, **kwargs):   # obj es tipo IntervalTimer, para acceder a atributos de ahi (counter)
     """ Functions that run twice a day. """
@@ -544,7 +500,7 @@ def FourADay(obj, *args, **kwargs):   # obj es tipo IntervalTimer, para acceder 
     return None
 
 def db_optimize(*, analysis_lim=None):
-    writer = SqliteQueueDatabase(MAIN_DB_NAME)
+    writer = SqliteQueueDatabase(db_name=MAIN_DB_NAME)
     if not writer.is_stopped():
         analysis_limit = analysis_lim if isinstance(analysis_lim, (int, float)) and 0.0 <= analysis_lim <= 5000 else 500
         writer.execute_sql(f"PRAGMA ANALYSIS_LIMIT={int(analysis_limit)}; ")
@@ -554,16 +510,15 @@ def db_optimize(*, analysis_lim=None):
 REPORT_PERIOD = 60          # Report period in days to display screen messages.
 # TODO(cmt): funciones a ejecutar en horas (1 < intervalo < 24 horas) PROVISORIO: -> Se usa para output a pantalla
 def hourlyTasks1(obj, *args, **kwargs):   # obj es tipo IntervalTimer, para acceder a atributos de ahi (counter)
-    """ For now: periodic screen output routine. """
+    """ For now: periodic output-to-screen routine. """
 
     for cls in Animal.getAnimalClasses():                # cls is Bovine, Ovine, etc. Animal Object Class.
         print(f"Day # {obj.counter * REPORT_PERIOD}:", end='')
         if cls.timeoutEvent().is_set():
             cls.timeoutEvent().clear()
-            dicto1 = {j[0]: (str(j[0].ID), j[1], j[2])
-                      for j in cls.getBkgdAnimalTimeouts()}
+            dicto1 = {j[0].recordID: (datetime.strftime(j[1], fDateTime)) for j in cls.getBkgdAnimalTimeouts()}
             if dicto1:
-                print(f'TimeOutAnimals: {dicto1}')
+                print(f'TimeOutAnimals ({len(dicto1)} items): {dicto1}')
         else:
             print('', end='')
         # if cls.categoryEvent().is_set():
@@ -586,63 +541,14 @@ def minuteTasks1(obj, *args, **kwargs):
     # print(f'$$$$ MINUTES $$$$ - RUN #:{obj.counter}... Done.')
     return
 
-# @timerWrapper(iterations=10)
-# def checkTriggerTables(*args, **kwargs):        # TODO: THIS IS DEPRECATED. NO LONGER USED.
-#     """ Checks whether TimeStamp has changed for the rows in [_sys_Trigger_Tables]. For any changes, enqueues a cursor
-#     in replicateBuffer with all the information needed to perform checks and updates of the memory data structures
-#     associated to each of the tables.
-#     """
-#     try:
-#         con = connCreate(MAIN_DB_NAME)
-#     except (sqlite3.Error, sqlite3.DatabaseError):
-#         return None
-#     else:
-#         if not isinstance(con, sqlite3.Connection):
-#             return None
-#     cur = con.execute("SELECT DB_Table_Name, TimeStamp, Last_Updated_By FROM _sys_Trigger_Tables; ")
-#     with con:
-#         if not isinstance(cur, sqlite3.Cursor):
-#             return None
-#         cur_data = cur.fetchall()
-#     con.close()      # NEED to close() here. Exiting with con: will call commit(), but NOT con.close()
-#     if cur_data:
-#         tbl_tstamps = {cur_data[i][0]: cur_data[i][1] for i in range(len(cur_data))}  # {Table_Name: TimeStamp, }
-#         last_updated_by = {cur_data[i][0]: cur_data[i][2] for i in range(len(cur_data))}  # {Table_Name:Last_Updated_,}
-#     else:
-#         tbl_tstamps = {}
-#         last_updated_by = {}
-#     if not tbl_tstamps:
-#         return None
-#
-#     for k in tbl_tstamps:                          # k is DB_Table_Name
-#         if tbl_tstamps[k] != checkTriggerTables.tstamps_last_values[k]:  # and last_updated_by[k] != TERMINAL_ID:
-#             if k in tables_and_methods:
-#                 the_method = tables_and_methods[k]
-#                 checkTriggerTables.tstamps_last_values[k] = tbl_tstamps[k]  # updates TimeStamp in last_values dict.
-#                 if callable(the_method):
-#                     the_object = tables_and_binding_objects.get(k, None)
-#                     if the_object:
-#                         print(f' hhhhhhheeeeeeeeeey Trigger Tables: AQUI ESTOY con {k}: ({tbl_tstamps[k]}, '
-#                               f'{last_updated_by[k]}) / '
-#                               f'{the_object.__name__}.{the_method} - self?: {the_method.__self__}!!! -- '
-#                               f'{moduleName()}-{lineNum()}')
-#                         replicateBuffer.enqueue(the_object=the_object, the_callable=the_method)
-#                     else:
-#                         replicateBuffer.enqueue(the_callable=the_method)
-#                 else:
-#                     return None
-#     return True
-# checkTriggerTables.tstamps_last_values = db_time_stamps     # {Table_Name: TimeStamp,}
-
-
 
 @timerWrapper(iterations=5)             # Temporizar pa' ver como anda...
 def processReplication(*args, **kwargs):
     """    ****** This function gets all method names from classes_with_replication dict and enqueues the method for
     REPLICATION processing. Then, the method (specific to each class that uses duplication) will check conditions and \
     execute code accordingly. This is to make the interface general  *********
-    Pulls record belonging to this Terminal from [_sys_Terminals] table and for changes detected enqueues a cursor
-    in replicateBuffer with all the information needed run the _processDuplicates() function for all required classes.
+    Pulls record belonging to this Terminal from [_sys_Trigger_Tables] table and for changes detected enqueues a cursor
+    in replicateBuffer with all the information needed runs the _processDuplicates() function for all required classes.
     @return: None
     """
     # TODO(cmt): For now, enqueues ALL the items found in the classes_with_replication dict. Includes both replication
@@ -783,7 +689,7 @@ class FrontEndHandler(object):
             self.__thread.daemon = False  # will join() at the end and have main wait until target func. orderly closes.
             if self not in self._obj_set:
                 self.register_obj()
-            self.__thread.start()  # TODO(cmt): Aqui arranca el front end thread con la funcion target.
+            self.__thread.start()  # TODO(cmt): Aqui arranca el front end thread con la target function.
             self.__running = True
             return True       # retorna thread para hacer start() mas tarde, si no se hizo autostart.
         return False
@@ -793,7 +699,7 @@ class FrontEndHandler(object):
             if not self.__running:
                 return False
             self.__running = False
-            self.unregister_obj()
+        self.unregister_obj()
 
 
         EntityObject.ActivityCleanup(self.__thread.ident)  # __outerAttr dict. cleanup: removes thread_id entry.

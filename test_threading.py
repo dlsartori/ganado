@@ -4,14 +4,14 @@ from krnl_custom_types import close_db_writes
 from krnl_threading import REPORT_PERIOD, IntervalFunctions, dailyFunctions, FrontEndHandler, TEST_MULTIPLIER
 from krnl_object_instantiation import loadItemsFromDB
 from krnl_async_buffer import AsyncBuffer       # Used to issue stop() to all buffers writers.
-from krnl_bovine import Bovine, Animal
+from krnl_bovine import Bovine
 # from fe_bovine import bovine_frontend           # Front end function.
 from krnl_person import Person
 from krnl_config import *
 from datetime import datetime
 from time import sleep, perf_counter
 import threading
-from krnl_sqlite import __fldNameCounter
+from krnl_db_query import __fldNameCounter
 try:
     import psutil           # These 2 used to query total memory used by application.
     import os
@@ -24,7 +24,7 @@ def moduleName():
 if __name__ == '__main__':
     shortList = (0, 1, 4, 8, 11, 18, 27, 32, 130, 172, 210, 244, 280, 398, 41, 61, 92, 363, 368, 372)  # ID=0 no existe.
     bovines = loadItemsFromDB(Bovine, items=shortList, init_tags=True)  # Abstract Factory funca lindo aqui...
-    Bovine._animal_items = [j.ID for j in bovines]  # Sends the list of items for running updateTimeout_bkgd()
+    Bovine._animal_items = [(j.ID, j.recordID) for j in bovines]  # Sends the list of items for running updateTimeout_bkgd()
     reportPeriod = REPORT_PERIOD   # En dias. Tiempo para presentar una nueva linea en pantalla
 
     krnl_logger.info(f'******* switchinterval is set to {sys.getswitchinterval()} seconds.')
@@ -32,8 +32,8 @@ if __name__ == '__main__':
     people = loadItemsFromDB(Person)
     # print(f'About Classes. person is: {people[0].__class__.__name__} / Animal: {bovines[0].__class__.__name__} / '
     #       f'isinstance(bovine[0], Animal): {isinstance(bovines[0], Animal)}')
-    krnl_logger.info(f'================= End loadItemsFromDB - Animal registerDict size: {len(Bovine.getRegisterDict())}'
-                     f'===========================================================')
+    krnl_logger.info(f'====================== End loadItemsFromDB - {Bovine.__name__} active objects: '
+                     f'{len(Bovine.get_active_uids_iter())} ======================================================')
 
     initialCat = {}
     t1 = t2 = 0  # medidores de tiempo del lazo for.
@@ -64,13 +64,15 @@ if __name__ == '__main__':
         t2e = perf_counter()
         t2 += t2e-t2s
         print(f'.', end='')
-        initialCat[j] = j.category.get()
+        initialCat[j.recordID] = (j.category.get())  # Gets updated category.
 
     print(f'\nMAIN THREAD>   inventory.set() avg time (msec): {t1/len(bovines)*1000}')
-    # print(f'MAIN THREAD>  category.set() avg time (msec): {t2 / len(bovines)*1000}')
+    print(f'MAIN THREAD>  category.set() avg time (msec): {t2 / len(bovines)*1000}')
     print(f'Initial Categories: {initialCat}')
     krnl_logger.info(f'\n================================= End Category, DOB Setup ==================================')
     print(f'\n')
+
+    # exit(0)
 
     # writeObj.start()  # TODO(cmt) TESTEADO!: Varios objetos CREAN errores de acceso (database is locked). USAR SOLO 1!
 
@@ -132,5 +134,6 @@ if __name__ == '__main__':
     # SqliteQueueDatabase.stop_all_writers()      # Processes all pending database cursor objects (mostly db writes).
     # writeObj.stop()
 
+    print(f'Tags found are: {[str(o.myTagNumbers)[1:-2] for o in bovines]}')
     print(f'MAIN THREAD> ULTIMA linea de codigo............adios.')
 

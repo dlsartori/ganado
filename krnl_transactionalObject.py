@@ -1,23 +1,12 @@
+from __future__ import annotations          # Used to define _get_duplicate_uids()
 from os import path
-import functools
-from collections import deque
+from uuid import UUID
+from krnl_config import krnl_logger
 from krnl_custom_types import DataTable, getRecords, DBTrigger
-from krnl_db_access import _create_db_trigger
-# from krnl_abstract_class_activity import Activity
+
 
 def moduleName():
     return str(path.basename(__file__))
-
-# def singleton(cls):         # Wrapper class for singleton classes -> All activities are singletons.
-#     """Make a class a Singleton class (only one instance)"""
-#     @functools.wraps(cls)
-#     def wrapper_singleton(*args, **kwargs):
-#         if not wrapper_singleton.instance:
-#             wrapper_singleton.instance = cls(*args, **kwargs)
-#         return wrapper_singleton.instance
-#     wrapper_singleton.instance = None
-#     return wrapper_singleton
-
 
 class TransactionalObject(object):
     __objClass = 100
@@ -28,75 +17,92 @@ class TransactionalObject(object):
             cls._initialize()               # Inicializa clases que definan metodo _initialize()
         super().__init_subclass__()
 
-        # if cls.__name__ in tables_and_binding_objects.values():     # todo: this loop to be deprecated.
-        #     # 1. Replaces Object_Name with object (ex: 'Animal' with <class Animal>) in tables_and_binding_objects dict.
-        #     k = next((k for k in tables_and_binding_objects if tables_and_binding_objects[k] == cls.__name__), None)
-        #     tables_and_binding_objects[k] = cls
-        #     # 2. Gets method/function from Method_Name via getattr()
-        #     if k in tables_and_methods:
-        #         tables_and_methods[k] = getattr(cls, tables_and_methods[k]) or None
-
-        # TODO: THESE ARE THE NEW TRIGGERS. Initializes all db triggers defined for class cls, if any.
+        # TODO(cmt): THESE ARE THE NEW TRIGGERS. Initializes all db triggers defined for class cls, if any.
         # Name mangling required here to prevent inheritance from resolving to wrong data.
         triggers_list = getattr(cls, '_' + cls.__name__ + '__db_triggers_list', None)
         if triggers_list:
             for j in triggers_list:
                 if isinstance(j, (list, tuple)) and len(j) == 2:  # j=(trigger_name, trigger_processing_func (callable))
                     _ = DBTrigger(trig_name=j[0], process_func=j[1], calling_obj=cls)
-
-        # # TODO: THESE ARE THE NEW TRIGGERS. Initializes all db triggers defined for class cls, if any.
-        # triggers_dict = getattr(cls, '_' + cls.__name__ + '__db_triggers_list', None)
-        # if triggers_dict:  # Name mangling required here to prevent inheritance from resolving to wrong data.
-        #     for trig in triggers_dict:
-        #         if 'repl' in str(trig.type):
-        #             classes_with_replication[trig] = cls  # {trigger_obj: calling object for method, }
-        #         elif 'dupl' in str(trig.type):
-        #             classes_with_duplication[trig] = cls
-        #         else:
-        #             pass
-
-        # # Initializes all db triggers defined for class cls, if any. TODO: THESE ARE THE NEW TRIGGERS.
-        # triggers_dict = getattr(cls, '_' + cls.__name__ + '__db_triggers_list', None)
-        # if triggers_dict:  # Name mangling required here to prevent inheritance from resolving to wrong data.
-        #     for item in triggers_dict:
-        #         if callable(item):
-        #             trigger_str = item(cls)
-        #             item_name = item.__name__       # pulls name string to identify "dupl", "repl" particles.
-        #         elif hasattr(item, '__func__'):
-        #             trigger_str = item.__func__(cls)
-        #             item_name = item.__func__.__name__
-        #         elif isinstance(item, str):
-        #             trigger_str = item
-        #             item_name = item
-        #         else:
-        #             trigger_str = None
-        #             item_name = ''
-        #         if trigger_str:
-        #             _create_db_trigger(trigger_str)  # Runs ALL triggers defined for cls.
-        #             # classes_with_replication = {id(trigger_generator): [cls, processing_function(callable)], }
-        #             if 'repl' in item_name.lower():  # "dupl", "repl" particles needed to assign items to dicts below.
-        #                 classes_with_replication[id(item)] = (cls, triggers_dict[item])
-        #             elif 'dupl' in item_name.lower():
-        #                 classes_with_duplication[id(item)] = (cls, triggers_dict[item])
-
-        # Initializes uid_dicts in the respective subclasses. Used to manage duplication in Animales,Caravanas,Geo, etc.
-        try:
-            # This way of calling is works ONLY because _init_uid_dicts is defined at the lowest level of inheritance.
-            # (Bovine, Caprine, etc) and NOT in their parent classes.
-            cls._init_uid_dicts()  # executes only when _init_uid_dicts is defined
-            # If passes, initializes dictionary {class: Duplication_method, } for all classes that implement duplication
+            print(f'CREATED Triggers for {cls}: {str(tuple([tr.name for tr in DBTrigger.get_trigger_register()]))}.')
+        # Initializes _active_uid_dict in the respective subclasses. Used to manage duplication in Animales,Caravanas,
+        # Geo, Device, etc. Name mangling needed to access ONLY classes that define _active_uids_df dictionaries.
+        if getattr(cls, '_active_uids_df', None) is not None:
+            # Calls ONLY for classes with _active_uids_df defined (Bovine, Caprine, etc) and NOT the parent classes.
+            # Also initializes dictionary {class: Duplication_index, } for all classes that implement duplication
             # classes_with_duplication[cls] = cls._processDuplicates
-        except AttributeError:
-            pass  # Otherwise, igonres.
+            # try:
+            cls._init_uid_dicts()  # executes only for classes that define _init_uid_dicts.
 
-        # TODO(cmt): IMPORTANT! this one MUST GO AFTER _init_uid_dicts(), as it uses __active_uids_dict data.
-        if hasattr(cls, '_' + cls.__name__ + '_memory_data'):
-            cls._init_memory_data()  # Dict {uid: {last_inventory: val, }, }  for now...
+        """IMPORTANT! this one MUST GO AFTER _init_uid_dicts(). The call below is deprecated. Use NEW ONE """
+        mem_data_classes = cls._myActivityClass._memory_data_classes if hasattr(cls, '_myActivityClass') else None
+        if mem_data_classes:
+            # with ThreadPoolExecutor(max_workers=len(mem_data_classes) + 1) as executor:
+            for c in mem_data_classes:
+                # Initializes local uids dicts for c and parent classes. Appends dict ONLY to classes
+                # that support_mem_data()
+                # TODO(cmt): Activities DON'T need to wait for these threads to complete. They operate normallly
+                # Activity._futures[c].append(executor.submit(c._memory_data_init_last_rec, cls,
+                #                                             cls.get_active_uids_iter()))
+                c._memory_data_init_last_rec(cls, cls.get_active_uids_dict())    # Non-threaded call.
+            f = [c for c in mem_data_classes if not c.is_ready()]
+            if f:           # Warns if any mem_data initializers are not yet finished.
+                krnl_logger.info(f'Activity {tuple(f)}  NOT READY while running thread launcher loop.')
+            # print(f'\n============= Futures dict Transactional Objects ({cls.__name__}): {Activity._futures}.')
+            # print(f"MEMORY DATA UID DICTS: {getattr(c, '_' + c.__name__ + '__local_active_uids_dict', None)}")
+
+    @classmethod
+    def get_active_uids_dict(cls):
+        """ OJO!: Returns the full dict for compatibility and out of coding needs. This dict MUST NEVER be modified. """
+        # return getattr(cls, '_active_uids_df', None)  # {animal_uid: duplication_index }
+        return cls.obj_dataframe()['fldOjbectUID'].tolist()
 
 
+
+    @classmethod
+    def get_dupl_index_checksum(cls):
+        """ _duplic_index_checksum getter """
+        return getattr(cls, '_duplic_index_checksum', None)
+
+    # @classmethod
+    # def set_dupl_index_checksum(cls, val):
+    #     """ _duplic_index_checksum setter """
+    #     setattr(cls, '_duplic_index_checksum', val)
+
+    @classmethod
+    def _get_duplicate_uids(cls, uid: UUID | str = None, *, all_duplicates=False) -> UUID | tuple | None:
+        """For a given uid, returns the Earliest Duplicate Record (the Original) if only 1 record exists or a tuple of
+        duplicate records associated to the uid.
+        For reference, the dictionaries are defined as follows:
+                _active_uids_df = {uid: _Duplication_Index, }   --> _Duplication_Index IS a uid.
+                _active_duplication_index_dict = {_Duplication_Index: [fldObjectUID, dupl_uid1, dupl_uid2, ], }
+        @param all_duplicates: True: returns all uids linked by a Duplication_Index value.
+                False: returns Earliest Duplicate uid. (Default).
+        @return: Original uid (UUID) or list of duplicate uids (tuple). None no duplicates exist for uid.
+
+         _Duplication_Index is set by SQLite. Flags db records created by different nodes that refer
+         to the same physical object. Duplicates are resolved between SQLite (triggers) and this function, by picking
+         min(fldTimeStamp) (record 1st created) in all cases.
+        """
+        if uid:
+            try:
+                uid = uid if isinstance(uid, UUID) else UUID(uid.strip())
+            except (SyntaxError, AttributeError, TypeError):
+                return None
+            uid = uid.hex  # converts to str for proper search in dictionaries.
+            # Pulls the right _active_uids_df for cls.
+            duplication_index = getattr(cls, '_active_uids_df', 0).get(uid)
+            if duplication_index is not None:
+                if all_duplicates:
+                    dupl_idx_dict = getattr(cls, '_active_duplication_index_dict', {})
+                    # if duplication_index in dupl_idx_dict:
+                    return tuple(dupl_idx_dict.get(duplication_index, []))
+                return duplication_index  # Returns single value (a UUID.hex or None)
+        return None
 
     def __init__(self):
-        pass
+        super().__init__()
+
 
     temp = getRecords('tblObjetosTiposDeTransferenciaDePropiedad', '', '', None, 'fldID', 'fldName')
     __ownershipXferDict = {}
@@ -124,6 +130,3 @@ class TransactionalObject(object):
     @property
     def localizationsDict(self):
         return TransactionalObject.__localizationsDict
-
-# transactObj = TransactionalObject()
-

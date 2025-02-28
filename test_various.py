@@ -3,14 +3,13 @@ from datetime import datetime
 import inspect
 import operator
 import time
-from time import sleep
-from krnl_cfg import *
+# from time import sleep
+# from krnl_cfg import *
 import functools
+# import orjson
 from krnl_custom_types import DataTable, setupArgs
-from krnl_cfg import moduleName, callerFunction
+from krnl_config import moduleName, callerFunction, json, fDateTime
 from operator import attrgetter
-from json import dump, dumps, loads, load
-import time
 
 ax = 'JuvDT'
 
@@ -169,10 +168,10 @@ if __name__ == '__main__':
         resultsDict[key] = eval_expression(evalString, allowedNames)
         print(f'evalString: {evalString}: {resultsDict[key]}')
     print(f'Resultados: {resultsDict}')
-    dumpedDict = dumps(activityOperands1)
+    dumpedDict = json.dumps(activityOperands1)
     # print(f'{activityOperators.items()}')
     print(f'Dumped Dict (dumps): {dumpedDict}')
-    retrievedDict = loads(dumpedDict)
+    retrievedDict = json.loads(dumpedDict)
     toprint = [f'{retrievedDict[j]}:{str(type(retrievedDict[j])).replace("<class ", "").replace(">","")}' for j in retrievedDict]
     print(f'Retrieved Dict (loads): {toprint}')
     # for i in retrievedDict:
@@ -185,19 +184,11 @@ if __name__ == '__main__':
         print(f'ahora en organicemonos() con todos sus callers: {callerFunction(includeMain="siiii")}  '
               f'/ StackDepth: {len(inspect.stack(0))}')
         argsNames = [i.tblName for i in args]
-        wrtOrders = [i.wrtOrder for i in args]
         undoOnErrorInicial = [i.undoOnError for i in args]
         print(f'args Original: {argsNames}')
-        print(f'write Orders: {wrtOrders}')
         print(f'undoOnError Inicial: {undoOnErrorInicial}')
 
-        ordered_args = sorted(args, key=lambda x: (x.wrtOrder, -x.undoOnError))
-        ordered_wrtOrder = [i.wrtOrder for i in ordered_args]
-        ordered_argsNames = [i.tblName for i in ordered_args]
-        ordered_undoOnError = [i.undoOnError for i in ordered_args]
-        print(f'args Ordered : {ordered_argsNames}')
-        print(f'ordered wrtOrder: {ordered_wrtOrder}')
-        print(f'ordered undoOnError: {ordered_undoOnError}')
+
 
     def test_sorted(val, *args, **kwargs):
         print(f'ahora en test_sorted : {callerFunction(includeMain=True)}')
@@ -257,13 +248,10 @@ if __name__ == '__main__':
         tblDataCastracion = DataTable(tblDataCastracionName)
         tblDataStatus = DataTable(tblDataStatusName)
         tblDataMediciones = DataTable(__tblDataMedicionesName)
-        tblRA.wrtOrder = 1
         tblRA.undoOnError = True
-        tblLink.wrtOrder = 2
         tblLink.undoOnError = True
         tblDataCategory.undoOnError = True
         tblPersonas.undoOnError = True
-        tblDataCaravanas.wrtOrder = 3
         tblObjects.undoOnError = True
         tblDataTMName.undoOnError = True
         organicemonos(tblTMTrasactions, tblPersonas, tblRA, tblMontos, tblDataLocalizacion, tblDataCastracion, tblLink,
@@ -302,14 +290,15 @@ if __name__ == '__main__':
     storeListstr = str(storeList)
     storeDict = {1: 1, 2: 2, 3: 3, 4: 'Hola'}
     print(f'\nstring of storeList: {storeListstr}')
-    print(f'Now back to List: {list(storeListstr)}')
+    print(f'Converting a string to type list: {list(storeListstr)}')
     print(f'\nNow going with json...')
-    jsonList = dumps(storeList)
-    jsonDict = dumps(storeDict)
+    jsonList = json.dumps(storeList)
+    jsonDict = json.dumps(storeDict, option=json.OPT_NON_STR_KEYS) if 'orjson' in json.__name__.lower() \
+        else json.dumps(storeDict)
     print(f'jsonList dumps: {jsonList} / type(jsonList): {type(jsonList)}')
     print(f'jsonDict: {jsonDict} / type(jsonDict): {type(jsonDict)}')
-    retrievedList = loads(jsonList)
-    retrievedDict = loads(jsonDict)
+    retrievedList = json.loads(jsonList)
+    retrievedDict = json.loads(jsonDict)
     print(f'jsonList retrieved list (loads): {retrievedList} /  type(retrievedList): {type(retrievedList)}')
     print(f'jsonList retrieved Dict (loads): {retrievedDict} /  type(retrievedList): {type(retrievedDict)}')
 # ============================================================================================================ #
@@ -340,11 +329,11 @@ if __name__ == '__main__':
     print(f"Is '' True or False??: {True if '' else False} / type(''): {type('')}")
     print(f'Is "" True or False??: {True if "" else False}')
 
-    print(f'\n CHECK of inTypes() function: checks 1 object against several types')
-    types = 'asdf', DataTable, int, float
-    print(f'Is {val} (type: {type(val)}) in the Types [{types}]: {inTypes(val, types)}')
+    # print(f'\n CHECK of inTypes() function: checks 1 object against several types')
+    # types = 'asdf', DataTable, int, float
+    # print(f'Is {val} (type: {type(val)}) in the Types [{types}]: {inTypes(val, types)}')
 
-    tableta = DataTable('tlbuasdf')
+    # tableta = DataTable('tlbuasdf')
 
 
     def count_calls(func):
@@ -371,7 +360,7 @@ if __name__ == '__main__':
 
     def repeat(_func=None, *, num_times=2):
         def decorator_repeat(func):
-            # @functools.wraps(func)
+            @functools.wraps(func)
             def wrapper_repeat(*args, **kwargs):
                 for _ in range(num_times):
                     value = func(*args, **kwargs)

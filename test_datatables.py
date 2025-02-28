@@ -11,7 +11,7 @@ if __name__ == '__main__':
 
     # Crea tablas leyendo de DB
     tblAnimales = getRecords('tblAnimales', '', '', None, '*', fldMF='F')     # DataTable con todos los animales Hembra
-    print(f'\n>>>Animales')
+    print(f'\n>>>Animales Hembra')
     print(f'Table DB Name:  {tblAnimales.dbTblName}, Table Name: {tblAnimales.tblName}')
     print(f'dataLen (cantidad de registros en lista dataList): {tblAnimales.dataLen}')
     print(f'Cantidad de Campos de {tblAnimales.tblName}: {tblAnimales.fldNamesLen}')

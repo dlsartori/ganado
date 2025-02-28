@@ -41,7 +41,7 @@ class ProgActivity(ABC):
                  '__progDataFields', '__referenceEvent', '__daysToProgDate', '__conditionsCreatePA', '__jsonDataCreate',
                  '__conditionsClosePA')
 
-    __lock = Lock()
+    # __lock = Lock()
 
     __paExcludedFieldsDefault = {'fldComment', 'fldFK_UserID', 'fldTimeStamp', 'fldTimeStampSync', 'fldBitmask',
                                  'fldPushUpload', 'fldFK_DataProgramacion'}

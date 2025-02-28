@@ -9,7 +9,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>482</width>
+    <width>625</width>
     <height>281</height>
    </rect>
   </property>
@@ -31,12 +31,12 @@
     <rect>
      <x>10</x>
      <y>10</y>
-     <width>461</width>
+     <width>606</width>
      <height>231</height>
     </rect>
    </property>
    <property name="currentIndex">
-    <number>2</number>
+    <number>0</number>
    </property>
    <widget class="QWidget" name="tab1">
     <attribute name="title">
@@ -45,7 +45,7 @@
     <widget class="QLabel" name="lblEstablecimiento">
      <property name="geometry">
       <rect>
-       <x>230</x>
+       <x>300</x>
        <y>61</y>
        <width>90</width>
        <height>13</height>
@@ -66,7 +66,7 @@
       <rect>
        <x>10</x>
        <y>117</y>
-       <width>434</width>
+       <width>578</width>
        <height>80</height>
       </rect>
      </property>
@@ -80,9 +80,9 @@
     <widget class="ComboTabla" name="cboMarca">
      <property name="geometry">
       <rect>
-       <x>323</x>
+       <x>393</x>
        <y>33</y>
-       <width>121</width>
+       <width>196</width>
        <height>20</height>
       </rect>
      </property>
@@ -90,9 +90,9 @@
     <widget class="ComboTabla" name="cboEstablecimiento">
      <property name="geometry">
       <rect>
-       <x>323</x>
+       <x>393</x>
        <y>58</y>
-       <width>121</width>
+       <width>196</width>
        <height>20</height>
       </rect>
      </property>
@@ -140,7 +140,7 @@
       <rect>
        <x>98</x>
        <y>8</y>
-       <width>121</width>
+       <width>196</width>
        <height>20</height>
       </rect>
      </property>
@@ -148,7 +148,7 @@
     <widget class="QLabel" name="lblMarca">
      <property name="geometry">
       <rect>
-       <x>229</x>
+       <x>299</x>
        <y>36</y>
        <width>90</width>
        <height>13</height>
@@ -199,9 +199,9 @@
     <widget class="ComboTabla" name="cboDuenio">
      <property name="geometry">
       <rect>
-       <x>323</x>
+       <x>393</x>
        <y>8</y>
-       <width>121</width>
+       <width>196</width>
        <height>20</height>
       </rect>
      </property>
@@ -211,7 +211,7 @@
       <rect>
        <x>98</x>
        <y>33</y>
-       <width>121</width>
+       <width>196</width>
        <height>20</height>
       </rect>
      </property>
@@ -221,7 +221,7 @@
       <rect>
        <x>98</x>
        <y>58</y>
-       <width>121</width>
+       <width>196</width>
        <height>20</height>
       </rect>
      </property>
@@ -229,7 +229,7 @@
     <widget class="QLabel" name="lblDuenio">
      <property name="geometry">
       <rect>
-       <x>227</x>
+       <x>297</x>
        <y>10</y>
        <width>90</width>
        <height>13</height>
@@ -285,7 +285,7 @@
       <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
      </property>
      <property name="buddy">
-      <cstring>tableViewLeft</cstring>
+      <cstring>tableWidgetLeft</cstring>
      </property>
     </widget>
     <widget class="QPushButton" name="btnNewTag">
@@ -323,8 +323,8 @@
     <widget class="QPushButton" name="btnToRight">
      <property name="geometry">
       <rect>
-       <x>210</x>
-       <y>90</y>
+       <x>286</x>
+       <y>79</y>
        <width>30</width>
        <height>23</height>
       </rect>
@@ -339,8 +339,8 @@
     <widget class="QLabel" name="lblSelRight">
      <property name="geometry">
       <rect>
-       <x>250</x>
-       <y>21</y>
+       <x>330</x>
+       <y>20</y>
        <width>136</width>
        <height>16</height>
       </rect>
@@ -352,14 +352,14 @@
       <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
      </property>
      <property name="buddy">
-      <cstring>tableViewRight</cstring>
+      <cstring>tableWidgetRight</cstring>
      </property>
     </widget>
     <widget class="QPushButton" name="btnToLeft">
      <property name="geometry">
       <rect>
-       <x>210</x>
-       <y>115</y>
+       <x>286</x>
+       <y>104</y>
        <width>30</width>
        <height>23</height>
       </rect>
@@ -371,12 +371,12 @@
       <bool>false</bool>
      </property>
     </widget>
-    <widget class="QTableView" name="tableViewRight">
+    <widget class="QTableWidget" name="tableWidgetRight">
      <property name="geometry">
       <rect>
-       <x>250</x>
-       <y>38</y>
-       <width>191</width>
+       <x>324</x>
+       <y>37</y>
+       <width>265</width>
        <height>133</height>
       </rect>
      </property>
@@ -385,35 +385,35 @@
        <pointsize>8</pointsize>
       </font>
      </property>
+     <property name="editTriggers">
+      <set>QAbstractItemView::NoEditTriggers</set>
+     </property>
      <property name="tabKeyNavigation">
       <bool>false</bool>
      </property>
      <property name="selectionMode">
-      <enum>QAbstractItemView::ExtendedSelection</enum>
+      <enum>QAbstractItemView::ContiguousSelection</enum>
      </property>
      <property name="selectionBehavior">
       <enum>QAbstractItemView::SelectRows</enum>
      </property>
-     <property name="showGrid">
-      <bool>false</bool>
-     </property>
-     <property name="gridStyle">
-      <enum>Qt::NoPen</enum>
-     </property>
      <attribute name="horizontalHeaderVisible">
-      <bool>true</bool>
+      <bool>false</bool>
      </attribute>
-     <attribute name="horizontalHeaderStretchLastSection">
-      <bool>true</bool>
+     <attribute name="horizontalHeaderHighlightSections">
+      <bool>false</bool>
      </attribute>
      <attribute name="verticalHeaderVisible">
       <bool>false</bool>
      </attribute>
      <attribute name="verticalHeaderMinimumSectionSize">
-      <number>10</number>
+      <number>16</number>
      </attribute>
      <attribute name="verticalHeaderDefaultSectionSize">
-      <number>15</number>
+      <number>16</number>
+     </attribute>
+     <attribute name="verticalHeaderHighlightSections">
+      <bool>false</bool>
      </attribute>
     </widget>
     <widget class="QLabel" name="lblBuscar">
@@ -438,19 +438,28 @@
       <cstring>txtBuscar</cstring>
      </property>
     </widget>
-    <widget class="QTableView" name="tableViewLeft">
+    <widget class="QTableWidget" name="tableWidgetLeft">
      <property name="geometry">
       <rect>
        <x>13</x>
        <y>38</y>
-       <width>191</width>
+       <width>265</width>
        <height>133</height>
       </rect>
+     </property>
+     <property name="maximumSize">
+      <size>
+       <width>16777215</width>
+       <height>16777215</height>
+      </size>
      </property>
      <property name="font">
       <font>
        <pointsize>8</pointsize>
       </font>
+     </property>
+     <property name="editTriggers">
+      <set>QAbstractItemView::NoEditTriggers</set>
      </property>
      <property name="tabKeyNavigation">
       <bool>false</bool>
@@ -461,28 +470,22 @@
      <property name="selectionBehavior">
       <enum>QAbstractItemView::SelectRows</enum>
      </property>
-     <property name="showGrid">
-      <bool>false</bool>
-     </property>
-     <property name="gridStyle">
-      <enum>Qt::NoPen</enum>
-     </property>
      <attribute name="horizontalHeaderVisible">
-      <bool>true</bool>
+      <bool>false</bool>
      </attribute>
-     <attribute name="horizontalHeaderStretchLastSection">
-      <bool>true</bool>
+     <attribute name="horizontalHeaderHighlightSections">
+      <bool>false</bool>
      </attribute>
      <attribute name="verticalHeaderVisible">
       <bool>false</bool>
      </attribute>
      <attribute name="verticalHeaderMinimumSectionSize">
-      <number>10</number>
+      <number>16</number>
      </attribute>
      <attribute name="verticalHeaderDefaultSectionSize">
-      <number>15</number>
+      <number>16</number>
      </attribute>
-     <attribute name="verticalHeaderStretchLastSection">
+     <attribute name="verticalHeaderHighlightSections">
       <bool>false</bool>
      </attribute>
     </widget>
@@ -507,7 +510,7 @@
     <widget class="QLabel" name="lblFechaServicio">
      <property name="geometry">
       <rect>
-       <x>30</x>
+       <x>43</x>
        <y>110</y>
        <width>111</width>
        <height>30</height>
@@ -526,9 +529,9 @@
     <widget class="QDateEdit" name="datServicio">
      <property name="geometry">
       <rect>
-       <x>146</x>
+       <x>157</x>
        <y>115</y>
-       <width>76</width>
+       <width>133</width>
        <height>20</height>
       </rect>
      </property>
@@ -555,9 +558,9 @@
      </property>
      <property name="geometry">
       <rect>
-       <x>146</x>
+       <x>157</x>
        <y>140</y>
-       <width>76</width>
+       <width>133</width>
        <height>20</height>
       </rect>
      </property>
@@ -577,7 +580,7 @@
     <widget class="QLabel" name="lblFechaDestete">
      <property name="geometry">
       <rect>
-       <x>30</x>
+       <x>43</x>
        <y>90</y>
        <width>111</width>
        <height>16</height>
@@ -596,9 +599,9 @@
     <widget class="QDateEdit" name="datDestete">
      <property name="geometry">
       <rect>
-       <x>146</x>
+       <x>157</x>
        <y>90</y>
-       <width>76</width>
+       <width>133</width>
        <height>20</height>
       </rect>
      </property>
@@ -622,7 +625,7 @@
     <widget class="QLabel" name="lblPeso">
      <property name="geometry">
       <rect>
-       <x>52</x>
+       <x>65</x>
        <y>140</y>
        <width>90</width>
        <height>17</height>
@@ -646,7 +649,7 @@
       <rect>
        <x>5</x>
        <y>10</y>
-       <width>226</width>
+       <width>299</width>
        <height>76</height>
       </rect>
      </property>
@@ -656,9 +659,9 @@
      <widget class="QDateEdit" name="datNacimiento">
       <property name="geometry">
        <rect>
-        <x>140</x>
+        <x>152</x>
         <y>20</y>
-        <width>76</width>
+        <width>133</width>
         <height>20</height>
        </rect>
       </property>
@@ -714,9 +717,9 @@
       </property>
       <property name="geometry">
        <rect>
-        <x>140</x>
+        <x>152</x>
         <y>45</y>
-        <width>76</width>
+        <width>133</width>
         <height>20</height>
        </rect>
       </property>
@@ -731,9 +734,9 @@
      </property>
      <property name="geometry">
       <rect>
-       <x>240</x>
+       <x>320</x>
        <y>10</y>
-       <width>201</width>
+       <width>271</width>
        <height>106</height>
       </rect>
      </property>
@@ -748,7 +751,7 @@
        <rect>
         <x>70</x>
         <y>47</y>
-        <width>121</width>
+        <width>190</width>
         <height>20</height>
        </rect>
       </property>
@@ -780,7 +783,7 @@
        <rect>
         <x>70</x>
         <y>20</y>
-        <width>121</width>
+        <width>190</width>
         <height>20</height>
        </rect>
       </property>
@@ -812,7 +815,7 @@
        <rect>
         <x>70</x>
         <y>75</y>
-        <width>121</width>
+        <width>190</width>
         <height>20</height>
        </rect>
       </property>
@@ -840,7 +843,7 @@
     <widget class="QCheckBox" name="chkDieta">
      <property name="geometry">
       <rect>
-       <x>250</x>
+       <x>330</x>
        <y>140</y>
        <width>166</width>
        <height>17</height>
@@ -853,7 +856,7 @@
     <widget class="QCheckBox" name="chkTratamientos">
      <property name="geometry">
       <rect>
-       <x>250</x>
+       <x>330</x>
        <y>120</y>
        <width>166</width>
        <height>17</height>
@@ -868,8 +871,8 @@
   <widget class="QPushButton" name="btnCancel">
    <property name="geometry">
     <rect>
-     <x>310</x>
-     <y>250</y>
+     <x>453</x>
+     <y>249</y>
      <width>76</width>
      <height>23</height>
     </rect>
@@ -881,8 +884,8 @@
   <widget class="QPushButton" name="btnOk">
    <property name="geometry">
     <rect>
-     <x>395</x>
-     <y>250</y>
+     <x>538</x>
+     <y>249</y>
      <width>76</width>
      <height>23</height>
     </rect>

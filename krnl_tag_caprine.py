@@ -10,39 +10,47 @@ def moduleName():
 
 
 class TagCaprine(TagAnimal):
+    _kindOfAnimalID = 2  # TODO(cmt): 1:'Vacuno', 2:'Caprino', 3:'Ovino', 4:'Porcino', 5:'Equino'.
+
+    # Duplication indices dict in every subclass to make searches faster.
+    _active_uids_dict = {}  # {fldObjectUID: fld_Duplication_Index}  --> fld_Duplication_Index IS an object UID.
+    _active_duplication_index_dict = {}  # {fld_Duplication_Index: set(fldObjectUID, dupl_uid1, dupl_uid2, ), }
+
     def __init__(self, **kwargs):
-        if kwargs.get('fldID') in self.__registerDict:
-            kwargs['repeatID'] = True                   # Signals tag ID already exists to constructor in Tag.
+        # if kwargs.get('fldID') in self.__registerDict:
+        #     kwargs['repeatID'] = True                   # Signals tag ID already exists to constructor in Tag.
         super().__init__(**kwargs)
 
-    __registerDict = {}  # {tagID: tagObject} Registro de Tags, para evitar duplicacion.
 
-    @classmethod
-    def getRegisterDict(cls):
-        return cls.__registerDict
 
-    @classmethod
-    def register(cls, obj):  # NO HAY CHEQUEOS. obj debe ser valido
-        try:
-            cls.__registerDict[obj.ID] = obj  # TODO-Design criteria: Si se repite key, sobreescribe con nuevo valor
-        except (NameError, KeyError, IndexError, ValueError, TypeError):
-            raise KeyError(f'ERR_INP_KeyError: {moduleName()}({lineNum()}) - {callerFunction()}')
-        return obj
-
-    @classmethod
-    def unRegister(cls, obj):  # Remueve obj .__registerDict
-        """
-        Removes object from .__registerDict
-        @param obj: object to remove/pop
-        @return: removed object if successful. False if fails.
-        """
-        retValue = cls.__registerDict.pop(obj.getID, False)  # Retorna False si no encuentra el objeto
-        return retValue
-
-    @property
-    def isRegistered(self):
-        retValue = True if self.getID in self.__registerDict else False
-        return retValue
+    # __registerDict = {}  # {tagID: tagObject} Registro de Tags, para evitar duplicacion.
+    #
+    # @classmethod
+    # def getRegisterDict(cls):
+    #     return cls.__registerDict
+    #
+    # @classmethod
+    # def register(cls, obj):  # NO HAY CHEQUEOS. obj debe ser valido
+    #     try:
+    #         cls.__registerDict[obj.ID] = obj  # TODO-Design criteria: Si se repite key, sobreescribe con nuevo valor
+    #     except (NameError, KeyError, IndexError, ValueError, TypeError):
+    #         raise KeyError(f'ERR_INP_KeyError: {moduleName()}({lineNum()}) - {callerFunction()}')
+    #     return obj
+    #
+    # @classmethod
+    # def unRegister(cls, obj):  # Remueve obj .__registerDict
+    #     """
+    #     Removes object from .__registerDict
+    #     @param obj: object to remove/pop
+    #     @return: removed object if successful. False if fails.
+    #     """
+    #     retValue = cls.__registerDict.pop(obj.getID, False)  # Retorna False si no encuentra el objeto
+    #     return retValue
+    #
+    # @property
+    # def isRegistered(self):
+    #     retValue = True if self.getID in self.__registerDict else False
+    #     return retValue
 
     @classmethod
     def generateTag(cls, **kwargs):

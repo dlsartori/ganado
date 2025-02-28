@@ -3,7 +3,7 @@ import sqlite3
 import sys
 from threading import Event
 from time import sleep, perf_counter_ns
-from krnl_abstract_base_classes import AbstractFactoryBaseClass, AbstractAsyncBaseClass
+from krnl_abstract_base_classes import AbstractAsyncBaseClass
 from krnl_config import krnl_logger, lineNum, print, DISMISS_PRINT, callerFunction, time_mt
 from threading import Lock
 from krnl_db_access import ResultTimeout, ThreadHelper, GreenletHelper, WriterPaused, PAUSE, UNPAUSE, SHUTDOWN, \
@@ -188,10 +188,10 @@ class AsyncBuffer(AbstractAsyncBaseClass):  # Class to manage memory asynchronou
         # Crea thread. write_spooler es el target.
         self._writer_thread = self._thread_helper.thread(buffer_writer)
 
+        db_name = self._cursor_type.writes_to_db()
         with self.__lock:
             self._is_stopped = False
             self._writer_thread.start()                    # TODO(cmt): Aqui arranca el writer thread.
-            db_name = self._cursor_type.writes_to_db()
             if db_name:
                 # if not any(j.writes_to_db() == self._cursor_type.writes_to_db() for j in self.__active_buffers):
                 # Si no existe Event en dict buffer_writers_stop_events, lo crea.
@@ -201,15 +201,6 @@ class AsyncBuffer(AbstractAsyncBaseClass):  # Class to manage memory asynchronou
                     self.buffer_writers_stop_events[db_name].clear()
             self.__active_buffers.append(self)  # Internal count of all active buffers. []-> it's ok to shutdown
         return True
-
-        # with self.__lock:
-        #     self._is_stopped = False
-        #     self._writer_thread.start()  # TODO(cmt): Aqui arranca el writer thread.
-        #     if self._cursor_type.writes_to_db():
-        #         if not self.__active_buffers:  # Si es primer async_buffer en llegar a __active_buffers, resetea Event.
-        #             self.buffer_writers_stop_events[].clear()
-        #     self.__active_buffers.append(self)  # Internal count of all active db-writers. []-> it's ok to shutdown
-        # return True
 
     def stop(self):
         """DO NOT USE this func from different threads to avoid deadlocks. Use only for orderly SHUTDOWN of buffers. """
@@ -222,16 +213,17 @@ class AsyncBuffer(AbstractAsyncBaseClass):  # Class to manage memory asynchronou
             self._write_queue.put(SHUTDOWN)
             self._is_stopped = True
             if self in self.__active_buffers:
-                self.__active_buffers.remove(self)
-            db_name = self._cursor_type.writes_to_db()      # db_name = database name | False.
+                self.__active_buffers.remove(self)   # remove() inside __lock to avoid removing an already-removed item.
+
+        db_name = self._cursor_type.writes_to_db()      # db_name = database name | False.
         t1 = perf_counter_ns()
         # TODO(cmt): join() effectively sits here until the _writer_thread.run() ends, processing all the pending items
         #  in the _writer_thread buffer and before resuming from this point on.
         self._writer_thread.join()     # join fuerza al thread que lanzo a writer a esperar que writer procese SHUTDOWN.
-        t2 = perf_counter_ns()
+        t2 = perf_counter_ns()      # TODO: remove perf_counter_ns() after testing.
         if db_name:
             if not any(j._cursor_type.writes_to_db() == db_name for j in self.__active_buffers):
-                self.buffer_writers_stop_events[db_name].set()      # This line ALWAYS after the above join()!
+                self.buffer_writers_stop_events[db_name].set()  # sets Stop Event. This line ALWAYS AFTER the join()!
 
         print(f'EEEHHHHHHHYYY stop(236) Just removed {self._writer_thread.name}. Remaining AsyncBuffers: '
               f'{self.__active_buffers}\nTime to execute join(): {(t2-t1)/1000} usec.')
@@ -303,10 +295,11 @@ class BufferWriter(object):         # BufferWriter instances are created inside 
     #  thread_priority = 15 -> 15**3 = 3375 switchintervals (16.8 secs with switchinterval = 0.005 sec).
     #  thread_priority=15.1, sleep time = 15.1**3.03 = 3756 switchintervals.
     #  thread_priority=16, sleep time = 16**3.33 = 10321 switchintervals (51 secs with switchinterval = 0.005 sec).
-    #  thread_priority = 18, sleep time = 18**4.0909 = 136,523 switchintervals.
+    #  thread_priority=18, sleep time = 18**4.0909 = 136,523 switchintervals.
     #  thread_priority=20 -> sleep time = 20**5 = 3,200,000 switchintervals (4.44 hrs).
     __BASE_SLEEP_TIME = sys.getswitchinterval()  # sleeps for 1 switchinterval when priority=1. For design convenience.
-    __MAX_SLEEP_TIME = 20 ** 5 + 1    # Max. possible sleeping time for a thread: 4.44 hours.
+    __MAX_PRIORITY = 20
+    __MAX_SLEEP_TIME = __MAX_PRIORITY ** 5 + 1  # Max. possible sleeping time for a thread: 4.44 hours.
 
     def __init__(self, buffer_obj, queue_obj, *, priority=0, qsize_action_threshold=200):
         self.buffer_obj = buffer_obj  # buffer_obj es un objeto de clase AsyncBuffer. Accede a metodo _execute()
@@ -415,14 +408,33 @@ class BufferWriter(object):         # BufferWriter instances are created inside 
     def set_thread_priority(self, val=0):
         if isinstance(val, (int, float)):
             if val < 1:
-                self.thread_priority = 0
-            elif val > 20:
-                self.thread_priority = 20       # 20 will allow for 20**3 = 8000/2 thread switches between runs.
+                local_priority = 0
+            elif val > self.__MAX_PRIORITY:             # __MAX_PRIORITY = 20 by design.
+                local_priority = self.__MAX_PRIORITY   # 20 will allow for 20**3 = 8000/2 thread switches between runs.
             else:
-                self.thread_priority = val
-            with self.__lock:
-                self.sleep_time = min(self.thread_priority ** (3 if self.thread_priority <= 15 else
-                                      self.thread_priority ** (self.thread_priority/(5-(self.thread_priority-15)*0.2)))
-                                      * self.__BASE_SLEEP_TIME, self.__MAX_SLEEP_TIME) if self.thread_priority else 0
+                local_priority = val
+            # with self.__lock:
+            self.sleep_time = min(local_priority ** (3 if local_priority <= 15 else
+                              local_priority ** (local_priority/(5-(local_priority-15)*0.2))) * self.__BASE_SLEEP_TIME,
+                              self.__MAX_SLEEP_TIME) if local_priority else 0
+            self.thread_priority = local_priority
         return self.thread_priority         # Retorna thread_priority porque se necesita el valor en AsyncBuffer.
 
+
+
+    def set_thread_priority00(self, val=0):
+        local_priority = self.thread_priority  # Local copy to handle potential nesting of this func.
+        if isinstance(val, (int, float)):
+            if val < 1:
+                self.thread_priority = 0
+            elif val > 20:
+                self.thread_priority = 20  # 20 will allow for 20**3 = 8000/2 thread switches between runs.
+            else:
+                self.thread_priority = val
+            # with self.__lock:
+            self.sleep_time = min(local_priority ** (3 if local_priority <= 15 else
+                                                     local_priority ** (local_priority / (5 - (
+                                                                 local_priority - 15) * 0.2))) * self.__BASE_SLEEP_TIME,
+                                  self.__MAX_SLEEP_TIME) if local_priority else 0
+
+        return self.thread_priority  # Retorna thread_priority porque se necesita el valor en AsyncBuffer.

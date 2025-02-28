@@ -1,6 +1,6 @@
 from krnl_abstract_class_activity import *
 from krnl_custom_types import setRecord
-from krnl_geo import Geo
+from krnl_geo_old import Geo
 from krnl_tm import MoneyActivity
 from krnl_person import Person
 
@@ -11,6 +11,22 @@ class PersonActivity(Activity):
     __tblObjName = 'tblPersonas'  # Si hay que cambiar estos nombres usar InventoryActivityAnimal.__setattr__()
     __tblLinkName = 'tblLinkPersonasActividades'
     __supportsPA = {}
+
+    # Lists all Activity classes that support memory data, for access and initialization.
+    _memory_data_classes = set()  # Initialized on creation of Activity classes. Defined here to include all Activities.
+
+    @classmethod
+    def getTblObjectsName(cls):
+        return cls.__tblObjectsName
+
+    @classmethod
+    def getTblRAName(cls):
+        return cls._tblRAName
+
+    @classmethod
+    def getTblLinkName(cls):
+        return cls._tblLinkName
+
 
     def __init__(self, isValid, activityName=None, activityID=None, invActivity=None,
                  enableActivity=activityEnableFull, *args, **kwargs):

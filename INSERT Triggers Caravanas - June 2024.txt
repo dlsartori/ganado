@@ -1,0 +1,117 @@
+# Original Trigger
+CREATE TRIGGER IF NOT EXISTS "Trigger_Caravanas_INSERT" AFTER INSERT ON "Caravanas" FOR EACH ROW BEGIN UPDATE "Caravanas" SET Terminal_ID = (SELECT Terminal_ID FROM _sys_terminal_id LIMIT 1), _Duplication_Index = NEW.UID_Objeto WHERE "Caravanas".ROWID == NEW.ROWID AND _Duplication_Index IS NULL; UPDATE "Caravanas" SET (_Duplication_Index, 'ID_Color', 'Numero Caravana', 'ID_Tecnologia De Caravana', 'ID_Tipo De Caravana', 'ID_Formato De Caravana', 'Comentario', 'Asignada A Clase', 'Record UPDATE', 'Cantidad De Marcadores', 'Imagen', 'ID_Usuario', 'Salida YN', 'ID_Item', 'Asignada a UID', 'PushUpload', 'Bitmask', 'TimeStamp Sync') = ((SELECT DISTINCT _Duplication_Index FROM "Caravanas" WHERE Identificadores_str == NEW. Identificadores_str AND "FechaHora Registro" == (SELECT MIN("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM Caravanas WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL))) AND ("Salida YN" == 0 OR "Salida YN" IS NULL)), NEW."ID_Color", NEW."Numero Caravana", NEW."ID_Tecnologia De Caravana", NEW."ID_Tipo De Caravana", NEW."ID_Formato De Caravana", NEW."Comentario", NEW."Asignada A Clase", NEW."Record UPDATE", NEW."Cantidad De Marcadores", NEW."Imagen", NEW."ID_Usuario", NEW."Salida YN", NEW."ID_Item", NEW."Asignada a UID", NEW."PushUpload", NEW."Bitmask", NEW."TimeStamp Sync") WHERE "Caravanas".ROWID IN (SELECT "ID_Caravana" FROM (SELECT DISTINCT "ID_Caravana", "FechaHora Registro" FROM "Caravanas" WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL) AND "FechaHora Registro" >= (SELECT MIN("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM "Caravanas" WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL))))); UPDATE _sys_Trigger_Tables SET TimeStamp = NEW."FechaHora Registro" WHERE DB_Table_Name == "Caravanas" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID AND NEW.Terminal_ID IS NOT NULL; END; 
+
+
+# Intermediate Trigger 17Jun24
+CREATE TRIGGER IF NOT EXISTS "Trigger_Caravanas_INSERT" AFTER INSERT ON "Caravanas" FOR EACH ROW BEGIN UPDATE "Caravanas" SET Terminal_ID = (SELECT Terminal_ID FROM _sys_terminal_id LIMIT 1), _Duplication_Index = NEW.UID_Objeto WHERE "Caravanas".ROWID == NEW.ROWID AND _Duplication_Index IS NULL; UPDATE "Caravanas" SET '_Duplication_Index' = (SELECT DISTINCT _Duplication_Index FROM "Caravanas" WHERE Identificadores_str == NEW. Identificadores_str AND "FechaHora Registro" == (SELECT MIN("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM Caravanas WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL))) AND ("Salida YN" == 0 OR "Salida YN" IS NULL)) WHERE "Caravanas".ROWID IN (SELECT "ID_Caravana" FROM (SELECT DISTINCT "ID_Caravana", "FechaHora Registro" FROM "Caravanas" WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL) AND "FechaHora Registro" >= (SELECT MIN("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM "Caravanas" WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL))))); UPDATE _sys_Trigger_Tables SET TimeStamp = NEW."FechaHora Registro" WHERE DB_Table_Name == "Caravanas" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID AND NEW.Terminal_ID IS NOT NULL; END; 
+
+# 18-Jun-24
+# Triggers with PHAT Logic. TWO TRIGGERS USED: 1 when no PHATT has been recorded (Only tag readout operations) and 1 when PHATT is recorded (Tag physicall attached to an Animal).
+# Most efficient solution. First Attempt.
+# In order to keep Triggers as clean as possible and avoid even more complicated logic to determine _Duplication_Index in non-duplicates and duplicates, the best option is to always populate the _Duplication_Index field in Caravanas, Animales, etc. When no duplicates existe, _Duplication_Index = UID_Objecto of the same record.
+# Then, Python will have to COUNT(“Identificadores_str”), (count > 1) to determine if there are duplicates to process.
+
+# 1)
+CREATE TRIGGER IF NOT EXISTS "Trigger_Caravanas_INSERT_NO_PHATT" AFTER INSERT ON "Caravanas" FOR EACH ROW  
+WHEN (SELECT SUM("Physically Attached") FROM "Caravanas" WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL)) == 0 
+BEGIN
+UPDATE "Caravanas" SET Terminal_ID = (SELECT Terminal_ID FROM _sys_terminal_id LIMIT 1) WHERE "Caravanas".ROWID == NEW.ROWID AND Terminal_ID IS NULL; 
+
+UPDATE "Caravanas" SET '_Duplication_Index' = (SELECT DISTINCT _Duplication_Index FROM "Caravanas" WHERE Identificadores_str == NEW. Identificadores_str AND "FechaHora Registro" == (SELECT MIN("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM Caravanas WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL))) AND ("Salida YN" == 0 OR "Salida YN" IS NULL))
+WHERE "Caravanas".ROWID IN (SELECT "ID_Caravana" FROM (SELECT DISTINCT "ID_Caravana" FROM "Caravanas" WHERE Identificadores_str == NEW.Identificadores_str AND (SELECT COUNT("Identificadores_str") FROM "Caravanas" WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL)) > 1 AND  ("Salida YN" == 0 OR "Salida YN" IS NULL) AND "FechaHora Registro" >= (SELECT MIN("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM "Caravanas" WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL))))); 
+
+UPDATE "Caravanas" SET '_Duplication_Index' = (SELECT DISTINCT UID_Objeto from "Caravanas" WHERE "Caravanas".ROWID == NEW.ROWID AND "Caravanas"._Duplication_Index IS NULL); 
+
+UPDATE _sys_Trigger_Tables SET TimeStamp = NEW."FechaHora Registro" WHERE DB_Table_Name == "Caravanas" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID AND (SELECT COUNT("Identificadores_str") FROM "Caravanas" WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL)) > 1; 
+END;
+
+
+# 2)
+CREATE TRIGGER IF NOT EXISTS "Trigger_Caravanas_INSERT_PHATT" AFTER INSERT ON "Caravanas" FOR EACH ROW 
+WHEN (SELECT SUM("Physically Attached") FROM "Caravanas" WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL)) > 0
+BEGIN
+UPDATE "Caravanas" SET Terminal_ID = (SELECT Terminal_ID FROM _sys_terminal_id LIMIT 1) WHERE "Caravanas".ROWID == NEW.ROWID AND Terminal_ID IS NULL; 
+
+
+UPDATE "Caravanas" SET '_Duplication_Index' = (SELECT DISTINCT _Duplication_Index FROM "Caravanas" WHERE Identificadores_str == NEW. Identificadores_str AND "FechaHora Registro" == (SELECT MAX("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM Caravanas WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL) AND  "Physically Attached" > 0)) AND ("Salida YN" == 0 OR "Salida YN" IS NULL) AND "Physically Attached" > 0)
+WHERE "Caravanas".ROWID IN (SELECT "ID_Caravana" FROM (SELECT DISTINCT "ID_Caravana" FROM "Caravanas" WHERE Identificadores_str == NEW.Identificadores_str AND (SELECT COUNT("Identificadores_str") FROM "Caravanas" WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL)) > 1 AND ("Salida YN" == 0 OR "Salida YN" IS NULL))); 
+
+UPDATE "Caravanas" SET '_Duplication_Index' = (SELECT DISTINCT UID_Objeto from "Caravanas" WHERE "Caravanas".ROWID == NEW.ROWID AND "Caravanas"._Duplication_Index IS NULL); 
+
+UPDATE _sys_Trigger_Tables SET TimeStamp = NEW."FechaHora Registro" WHERE DB_Table_Name == "Caravanas" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID AND (SELECT COUNT("Identificadores_str") FROM "Caravanas" WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL)) > 1 ; 
+END; 
+
+# *********************************************** End Caravanas Triggers, 1st Attempt *****************************************************************************
+
+
+
+
+# Most efficient solution. 2nd Attempt.
+# Here, _Duplication_Index is left blank (NULL) when there are no duplicates (COUNT(“Identificadores_str”) = 1) and is only populated when  COUNT(“Identificadores_str”) > 1.
+# The resulting triggers are more efficient and the Python logic is greatly simplified and more efficient too.
+# The 1st change is that Terminal_ID is not set by Triggers anymore. It is established as a Default Value in all tables carrying it (Animales, Dispositivos, Geo Entidades, Caravanas) as the ID of the local node, set in table _sys_terminal_id. This simplifies the requirements for Triggers.
+
+# 1) - No PHATT
+CREATE TRIGGER IF NOT EXISTS "Trigger_Caravanas_INSERT_NO_PHATT" AFTER INSERT ON "Caravanas" FOR EACH ROW  
+WHEN (SELECT SUM("Physically Attached") FROM "Caravanas" WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL)) == 0 AND (SELECT COUNT("Identificadores_str") FROM "Caravanas" WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL)) > 1
+BEGIN
+
+UPDATE "Caravanas" SET '_Duplication_Index' = IFNULL((SELECT DISTINCT _Duplication_Index FROM "Caravanas" WHERE Identificadores_str == NEW. Identificadores_str AND "FechaHora Registro" == (SELECT MIN("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM Caravanas WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL))) AND ("Salida YN" == 0 OR "Salida YN" IS NULL)), 
+                                                     (SELECT DISTINCT         UID_Objeto FROM "Caravanas" WHERE Identificadores_str == NEW. Identificadores_str AND "FechaHora Registro" == (SELECT MIN("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM Caravanas WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL))) AND ("Salida YN" == 0 OR "Salida YN" IS NULL)))
+WHERE "Caravanas".ROWID IN (SELECT "ID_Caravana" FROM (SELECT DISTINCT "ID_Caravana" FROM "Caravanas" WHERE Identificadores_str == NEW.Identificadores_str AND  ("Salida YN" == 0 OR "Salida YN" IS NULL) AND "FechaHora Registro" >= (SELECT MIN("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM "Caravanas" WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL))))); 
+
+UPDATE _sys_Trigger_Tables SET TimeStamp = NEW."FechaHora Registro" WHERE Trigger_Name == "Trigger_Caravanas_INSERT_NO_PHATT" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID ; 
+END;
+
+# One-liner
+CREATE TRIGGER IF NOT EXISTS "Trigger_Caravanas_INSERT_NO_PHATT" AFTER INSERT ON "Caravanas" FOR EACH ROW WHEN (SELECT SUM("Physically Attached") FROM "Caravanas" WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL)) == 0 AND (SELECT COUNT("Identificadores_str") FROM "Caravanas" WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL)) > 1 BEGIN UPDATE "Caravanas" SET '_Duplication_Index' = IFNULL((SELECT DISTINCT _Duplication_Index FROM "Caravanas" WHERE Identificadores_str == NEW. Identificadores_str AND "FechaHora Registro" == (SELECT MIN("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM Caravanas WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL))) AND ("Salida YN" == 0 OR "Salida YN" IS NULL)),  (SELECT DISTINCT         UID_Objeto FROM "Caravanas" WHERE Identificadores_str == NEW. Identificadores_str AND "FechaHora Registro" == (SELECT MIN("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM Caravanas WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL))) AND ("Salida YN" == 0 OR "Salida YN" IS NULL))) WHERE "Caravanas".ROWID IN (SELECT "ID_Caravana" FROM (SELECT DISTINCT "ID_Caravana" FROM "Caravanas" WHERE Identificadores_str == NEW.Identificadores_str AND  ("Salida YN" == 0 OR "Salida YN" IS NULL) AND "FechaHora Registro" >= (SELECT MIN("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM "Caravanas" WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL)))));  UPDATE _sys_Trigger_Tables SET TimeStamp = NEW."FechaHora Registro" WHERE Trigger_Name == "Trigger_Caravanas_INSERT_NO_PHATT" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID ;  END;
+
+
+
+# 2 - With PHATT
+CREATE TRIGGER IF NOT EXISTS "Trigger_Caravanas_INSERT_PHATT" AFTER INSERT ON "Caravanas" FOR EACH ROW 
+WHEN (SELECT SUM("Physically Attached") FROM "Caravanas" WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL)) > 0 AND (SELECT COUNT("Identificadores_str") FROM "Caravanas" WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL)) > 1
+BEGIN
+
+UPDATE "Caravanas" SET '_Duplication_Index' = IFNULL((SELECT DISTINCT _Duplication_Index FROM "Caravanas" WHERE Identificadores_str == NEW. Identificadores_str AND "FechaHora Registro" == (SELECT MAX("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM Caravanas WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL) AND  "Physically Attached" > 0)) AND ("Salida YN" == 0 OR "Salida YN" IS NULL) AND "Physically Attached" > 0), 
+                                                     (SELECT DISTINCT         UID_Objeto FROM "Caravanas" WHERE Identificadores_str == NEW. Identificadores_str AND "FechaHora Registro" == (SELECT MAX("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM Caravanas WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL) AND  "Physically Attached" > 0)) AND ("Salida YN" == 0 OR "Salida YN" IS NULL) AND "Physically Attached" > 0))
+WHERE "Caravanas".ROWID IN (SELECT "ID_Caravana" FROM (SELECT DISTINCT "ID_Caravana" FROM "Caravanas" WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL))); 
+
+UPDATE _sys_Trigger_Tables SET TimeStamp = NEW."FechaHora Registro" WHERE Trigger_Name == "Trigger_Caravanas_INSERT_PHATT" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID; 
+END; 
+
+# One-liner
+CREATE TRIGGER IF NOT EXISTS "Trigger_Caravanas_INSERT_PHATT" AFTER INSERT ON "Caravanas" FOR EACH ROW WHEN (SELECT SUM("Physically Attached") FROM "Caravanas" WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL)) > 0 AND (SELECT COUNT("Identificadores_str") FROM "Caravanas" WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL)) > 1 BEGIN UPDATE "Caravanas" SET '_Duplication_Index' = IFNULL((SELECT DISTINCT _Duplication_Index FROM "Caravanas" WHERE Identificadores_str == NEW. Identificadores_str AND "FechaHora Registro" == (SELECT MAX("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM Caravanas WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL) AND  "Physically Attached" > 0)) AND ("Salida YN" == 0 OR "Salida YN" IS NULL) AND "Physically Attached" > 0), (SELECT DISTINCT         UID_Objeto FROM "Caravanas" WHERE Identificadores_str == NEW. Identificadores_str AND "FechaHora Registro" == (SELECT MAX("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM Caravanas WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL) AND  "Physically Attached" > 0)) AND ("Salida YN" == 0 OR "Salida YN" IS NULL) AND "Physically Attached" > 0)) WHERE "Caravanas".ROWID IN (SELECT "ID_Caravana" FROM (SELECT DISTINCT "ID_Caravana" FROM "Caravanas" WHERE Identificadores_str == NEW.Identificadores_str AND ("Salida YN" == 0 OR "Salida YN" IS NULL))); UPDATE _sys_Trigger_Tables SET TimeStamp = NEW."FechaHora Registro" WHERE Trigger_Name == "Trigger_Caravanas_INSERT_PHATT" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID;  END; 
+
+
+
+# 3 - The trigger below sets the JSON field UID_Objeto to the list of Tag uids associated with the Inventory Activity. for normal object functions, the list is
+# limited to 1 item: the uid for which the Inventory is recorded. For block execution, a list of all uids tied to this one activity is passed.
+# The Trigger executes ONLY when the executing node is the local node. Does not execute for replicated records.
+
+CREATE TRIGGER IF NOT EXISTS "Trigger_Data Caravanas Inventario_INSERT" AFTER INSERT ON "Data Caravanas Inventario" FOR EACH ROW 
+WHEN NEW.Terminal_ID IS NULL 
+BEGIN 
+UPDATE"Data Caravanas Inventario" SET "Terminal_ID" = (SELECT Terminal_ID FROM _sys_terminal_id LIMIT 1); 
+UPDATE "Data Caravanas Inventario" SET "UID_Objeto" = json_group_array( "ID_Caravana") FROM (SELECT "ID_Caravana" FROM "Link Caravanas Actividades" WHERE "ID_Actividad" == NEW."ID_Actividad") WHERE "Data Caravanas Inventario"."ID_Data Inventario" == NEW."ID_Data Inventario"; 
+END;
+
+# One-liner
+CREATE TRIGGER IF NOT EXISTS "Trigger_Data Caravanas Inventario_INSERT" AFTER INSERT ON "Data Caravanas Inventario" FOR EACH ROW WHEN NEW.Terminal_ID IS NULL BEGIN UPDATE"Data Caravanas Inventario" SET "Terminal_ID" = (SELECT Terminal_ID FROM _sys_terminal_id LIMIT 1); UPDATE "Data Caravanas Inventario" SET "UID_Objeto" = json_group_array( "ID_Caravana") FROM (SELECT "ID_Caravana" FROM "Link Caravanas Actividades" WHERE "ID_Actividad" == NEW."ID_Actividad") WHERE "Data Caravanas Inventario"."ID_Data Inventario" == NEW."ID_Data Inventario"; END;
+
+# *********************************************** End Caravanas Triggers, 2nd Attempt *****************************************************************************
+
+
+
+
+
+
+ 
+ 
+
+
+
+
+
+
+

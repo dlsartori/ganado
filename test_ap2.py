@@ -1,21 +1,17 @@
+# import faulthandler
 import threading
 from krnl_config import *
 from datetime import timedelta
-from krnl_custom_types import DataTable, getRecords, setRecord, setupArgs, close_db_writes
-# from krnl_sqlite import SQLiteQuery, getTableInfo
-from krnl_db_access import writeObj, init_db_replication_triggers, SqliteQueueDatabase, init_database
+from krnl_custom_types import DataTable, getRecords, setRecord, close_db_writes, dbRead
+# from krnl_db_access import writeObj
 from krnl_object_instantiation import loadItemsFromDB
 from krnl_bovine import Bovine
 from krnl_abstract_class_animal import Animal       # Pa' ejecutar paCreateActivity()
+from krnl_abstract_class_activity import Activity
 from krnl_tag_activity import TagActivity
-# from krnl_bovine_activity import BovineActivity
-# from krnl_animal import Animal
-from time import sleep
-from krnl_animal_activity import AnimalActivity, ProgActivityAnimal, GenericActivityAnimal
-from krnl_async_buffer import AsyncBuffer
-from krnl_abstract_class_prog_activity import ActivityTrigger, ProgActivity
-from krnl_geo_new import Geo
-from threading import current_thread
+from krnl_animal_activity import AnimalActivity, InventoryActivityAnimal, ProgActivityAnimal, GenericActivityAnimal, StatusActivityAnimal
+from krnl_geo import Geo
+# from threading import current_thread
 
 flds = ["fldID", "fldDate", "fldFK_NombreActividad", "fldFK_ClaseDeAnimal", "fldPAData", "fldWindowLowerLimit",
         "fldDiasParaEjecucion", "fldWindowUpperLimit", "fldDaysToAlert", "fldDaysToExpire", "fldComment"]
@@ -113,6 +109,7 @@ def tit_count(self, *, tit_number=None):    # TODO: MUST pass self as 1st argume
 
 
 if __name__ == "__main__":
+    # faulthandler.enable()
     timeStamp = time_mt("dt")
     userID = sessionActiveUser
     tblDataProg = DataTable("tblDataProgramacionDeActividades")
@@ -120,21 +117,19 @@ if __name__ == "__main__":
     tblLinkPA = DataTable("tblLinkAnimalesActividadesProgramadas")
     tblRAP = DataTable("tblAnimalesRegistroDeActividadesProgramadas")
 
-    # if DB_REPLICATE:
-    #     trigger_tables = init_db_replication_triggers()
-    #     print(f'INSERT/UPDATE Triggers created for: {trigger_tables}')
-    #     print(f'tables_and_binding_objs: {tables_and_binding_objects}\ntables_and_methods:{tables_and_methods}.')
-    # init_database()
-
     print(f'\nAnimal Activities defined: {[j.__name__ for j in AnimalActivity.get_class_register()]}')
     print(f'Tag Activities defined: {[j.__name__ for j in TagActivity.get_class_register()]}\n')
     supershort = (363, 368, 372)
     shortList = (1, 4, 5, 11, 18, 27, 32, 130, 172, 210, 244, 280, 363, 368, 372, 92, 120)  # ID=0 no existe.
     # TODO(cmt): OJO! loadItemsFromDB NO genera la lista bovines en el mismo orden en que los IDs estan en shortlist.
     bovines = loadItemsFromDB(Bovine, items=shortList, init_tags=True)  # Abstract Factory funca lindo aqui...
+    print(f'ACTIVE UIDs: {[j.ID for j in bovines]}')
     for idx, j in enumerate(bovines):
         print(f'index{idx} : {j}')
 
+    # Items with inventory date != 0 and not present in bovines.
+    not_found = {'22ff143d684c4848843f4d2fe82992f4', '6808e3d6169d40fdbb2a1187e4ba4297', '0d9b48c92d7f4328b87a19fef2f213d7', '4308cbf21f744864bc5276223da37fcc'}
+    not_found_fldID = [41, 8, 61, 398]
     # Check measurement() property/method.
     # bovines[0].measurement.set(meas_name='peso', meas_value=230, meas_units='kg')
     # bovines[0].measurement.get(meas_name='PESO')
@@ -143,10 +138,31 @@ if __name__ == "__main__":
     # Checks registration and execution of externally-defined functions that are added to the GenericActivity objects.
     Animal.GenActivity_register_func(property_name='weaning', func_object=tit_count)
     bovines[0].weaning.tit_count(tit_number=15)
-    bovines[0].inventory._pop_outerAttr_key(current_thread().ident)
-    bovines[0].weaning.get()
+    # bovines[0].inventory._pop_outerAttr_key(current_thread().ident)
+    bovines[1].weaning.set(val=time_mt('dt'))  # Usa val porque es GenericActivity.
+    bovines[1].weaning.get()
+    inv0 = bovines[0].inventory.get()
+    print(f'Inventory for {bovines[0].recordID}: {inv0}')
+    # inventory_obj is an Instance of InventoryActivity class that implements __call__() to access outerObject.
+    bovines[12].inventory.set(date=datetime.now() + timedelta(days=120))
 
-    bovines[0].inventory.get()
+    # inventory_obj() is a classmethod whose __call__() method returns cls, so as to pass cls as 1st argument to get().
+    inv_uid = Bovine.inventory_classmethod().get(uid=bovines[12].ID)
+    print(f'Inventory_obj call for {bovines[12].recordID}: {inv_uid}')
+
+    bovines[1].status.set(status=3)
+    bovines[1].tact.set(val=1)      # Esta esta funcando bien (10-Jan-24). Usa val porque es GenericActivity.
+    a = bovines[1].tact.get()       # Esta parece que tambien.
+
+    categ_problem_objs = (37, 68, 101, 172, 184, 191)
+    tbl_problems = dbRead('tblAnimales', f'SELECT * from "Animales" WHERE "ID_Animal" IN {str(categ_problem_objs)}; ')
+    problem_uids = tbl_problems.getCol('fldObjectUID')
+    for uid in problem_uids:
+        obj = Bovine.getObject(uid)
+        if 'm' in obj.mf:
+            obj.category.set(category=6)
+
+
     # close_db_writes()  # Flushes all buffers, writes all data to DB and suspends db write operations.
     # exit(0)
 
@@ -156,9 +172,12 @@ if __name__ == "__main__":
     print(f'argv: {argv}')
     print(f'USE_DAYS_MULT: {USE_DAYS_MULT}; DISMISS_PRINT: {DISMISS_PRINT}; create_pa: {create_pa}')
     inventoryList = (244, 120, 92, 372, 368, 280, 210, 172, 130, 32, 18, 4)
-    if create_pa:     # [180, None] checks comp_val >= 180.
+
+    geo_obj = next((g for g in Geo.getObject("El Ñandú") if removeAccents(g.name) in removeAccents("El Ñandú")), None)
+    if create_pa:     # [180, None] checks _comp_val >= 180.
         paDict = {"fldMF": "m", "fldComment": "Test Inventario- El Ñandú", "age": [180, None],
-                  "fldFK_Localizacion": Geo.getObject("El Ñandú").ID}     # "42990b601cec4ddb9d85bfb94cda2e29"
+                  "fldFK_Localizacion": geo_obj.ID}     # "42990b601cec4ddb9d85bfb94cda2e29"
+        # Generates data set for items with recordID event (excludes odds)
         paDataset = paSetDataInventory(prog_date=time_mt('date_time') + timedelta(days=60), tbl_RAP=tblRAP,
                                        items=[j.ID for j in bovines if j. recordID in shortList and not j.recordID & 1],
                                         tbl_data_prog=tblDataProg, tbl_link_pa=tblLinkPA, pa_dict=paDict)
@@ -166,7 +185,7 @@ if __name__ == "__main__":
         # items_dict = {j: progDate for j in bovines if j.recordID in inventoryList}   fldFK_Localizacion
         paInventory = Bovine.paCreateActivity(paDataset.pop(0), *paDataset)
     else:
-        # Not creating new progActivities. Goes to set inventories for selected objects.
+        # Not creating new progActivities here. Goes to set inventories for selected objects and close ProgActivities.
         horita = time_mt('datetime')
         print('                                  ######################## Localizations: ########################')
         for j in bovines:

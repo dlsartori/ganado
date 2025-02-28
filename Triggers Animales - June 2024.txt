@@ -1,0 +1,97 @@
+# OLD TRIGGERS.
+CREATE TRIGGER IF NOT EXISTS "Trigger_Animales_INSERT" AFTER INSERT ON "Animales" FOR EACH ROW BEGIN UPDATE "Animales" SET Terminal_ID = (SELECT Terminal_ID FROM _sys_terminal_id LIMIT 1), _Duplication_Index = NEW.UID_Objeto WHERE "Animales".ROWID == NEW.ROWID AND _Duplication_Index IS NULL; UPDATE "Animales" SET (_Duplication_Index, 'ID_Clase De Animal', 'ID_Raza', 'Fecha De Nacimiento', 'Comentario', 'UID_Objeto_Original', 'ID_Animal Madre', 'ID_Animal Padre', 'Tipo De Gestacion', 'ID_Madre Subrogante', 'Nombre', 'Record UPDATE', 'Identificadores', 'ID_Usuario', 'Castrado YN', 'Salida YN', 'Modo', 'MachoHembra', 'Bitmask', 'TimeStamp Sync') = (((SELECT DISTINCT _Duplication_Index FROM (SELECT DISTINCT _Duplication_Index, "FechaHora Registro" FROM "Animales", json_each("Animales".Identificadores) WHERE json_valid("Animales".Identificadores) AND INSTR(NEW.Identificadores_str, json_each.value) > 0 AND ("Salida YN" == 0 OR "Salida YN" IS NULL)) WHERE "FechaHora Registro" == (SELECT MIN("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM "Animales", json_each("Animales".Identificadores) WHERE json_valid("Animales".Identificadores) AND  INSTR(NEW.Identificadores_str, json_each.value) > 0 AND ("Salida YN" == 0 OR "Salida YN" IS NULL))))), NEW."ID_Clase De Animal", NEW."ID_Raza", NEW."Fecha De Nacimiento", NEW."Comentario", NEW."UID_Objeto_Original", NEW."ID_Animal Madre", NEW."ID_Animal Padre", NEW."Tipo De Gestacion", NEW."ID_Madre Subrogante", NEW."Nombre", NEW."Record UPDATE", NEW."Identificadores", NEW."ID_Usuario", NEW."Castrado YN", NEW."Salida YN", NEW."Modo", NEW."MachoHembra", NEW."Bitmask", NEW."TimeStamp Sync") WHERE "Animales".ROWID IN (SELECT "ID_Animal" FROM (SELECT DISTINCT "ID_Animal", "FechaHora Registro" FROM "Animales", json_each("Animales".Identificadores) WHERE json_valid("Animales".Identificadores) AND INSTR(NEW.Identificadores_str, json_each.value) > 0 AND ("Salida YN" == 0 OR "Salida YN" IS NULL) AND "FechaHora Registro" >= (SELECT MIN("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM "Animales", json_each("Animales".Identificadores) WHERE json_valid("Animales".Identificadores) AND INSTR(NEW.Identificadores_str, json_each.value) > 0 AND ("Salida YN" == 0 OR "Salida YN" IS NULL))))); UPDATE _sys_Trigger_Tables SET TimeStamp = NEW."FechaHora Registro" WHERE DB_Table_Name == "Animales" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID AND NEW.Terminal_ID IS NOT NULL; END; 
+CREATE TRIGGER IF NOT EXISTS "Trigger_Animales Registro De Actividades_INSERT" AFTER INSERT ON "Animales Registro De Actividades" FOR EACH ROW WHEN NEW.Terminal_ID IS NOT NULL AND NEW.Terminal_ID != (SELECT Terminal_ID FROM _sys_terminal_id LIMIT 1) BEGIN UPDATE _sys_Trigger_Tables SET TimeStamp = NEW."FechaHora Registro" WHERE DB_Table_Name == "Animales Registro De Actividades" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID; UPDATE _sys_Trigger_Tables SET "Updated_By" = json_set("Updated_By", "$[#]", NEW."ID_Clase De Animal") WHERE DB_Table_Name == "Animales Registro De Actividades" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID AND (SELECT _sys_Trigger_Tables."Updated_By" FROM _sys_Trigger_Tables, json_each(_sys_Trigger_Tables."Updated_By") WHERE _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID AND DB_Table_Name == "Animales Registro De Actividades" AND json_valid(_sys_Trigger_Tables."Updated_By") AND INSTR(CAST(json_each.json AS TEXT), NEW."ID_Clase De Animal") == 0 ) > 0; END; 
+
+# END OLD TRIGGERS
+
+
+
+# Note: Assigns _Duplication_Index the _Duplication_Index found in a record that shares at least 1 Identifier (Identificadores_str) and has the MIN(FechaHora Registro).
+UPDATE "Animales" SET _Duplication_Index = (SELECT DISTINCT _Duplication_Index FROM (SELECT DISTINCT _Duplication_Index, "FechaHora Registro" FROM "Animales", json_each("Animales".Identificadores) WHERE json_valid("Animales".Identificadores) AND INSTR(NEW.Identificadores_str, json_each.value) > 0 AND ("Salida YN" == 0 OR "Salida YN" IS NULL))
+
+
+# NEW TRIGGERS:
+CREATE TRIGGER IF NOT EXISTS "Trigger_Animales_INSERT" AFTER INSERT ON "Animales" FOR EACH ROW 
+BEGIN
+
+UPDATE "Animales" SET _Duplication_Index = (SELECT DISTINCT _Duplication_Index FROM (SELECT DISTINCT _Duplication_Index, "FechaHora Registro" FROM "Animales", json_each("Animales".Identificadores) WHERE json_valid("Animales".Identificadores) AND INSTR(NEW.Identificadores_str, json_each.value) > 0 AND ("Salida YN" == 0 OR "Salida YN" IS NULL)) WHERE "FechaHora Registro" == (SELECT MIN("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM "Animales", json_each("Animales".Identificadores) WHERE json_valid("Animales".Identificadores) AND  INSTR(NEW.Identificadores_str, json_each.value) > 0 AND ("Salida YN" == 0 OR "Salida YN" IS NULL)))) 
+WHERE "Animales".ROWID IN (SELECT "ID_Animal" FROM (SELECT DISTINCT "ID_Animal", "FechaHora Registro" FROM "Animales", json_each("Animales".Identificadores) WHERE json_valid("Animales".Identificadores) AND INSTR(NEW.Identificadores_str, json_each.value) > 0 AND ("Salida YN" == 0 OR "Salida YN" IS NULL) AND "FechaHora Registro" >= (SELECT MIN("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM "Animales", json_each("Animales".Identificadores) WHERE json_valid("Animales".Identificadores) AND INSTR(NEW.Identificadores_str, json_each.value) > 0 AND ("Salida YN" == 0 OR "Salida YN" IS NULL))))); 
+
+UPDATE _sys_Trigger_Tables SET TimeStamp = NEW."FechaHora Registro" WHERE Trigger_Name == "Trigger_Animales_INSERT" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID; 
+END; 
+
+# One-liner
+CREATE TRIGGER IF NOT EXISTS "Trigger_Animales_INSERT" AFTER INSERT ON "Animales" FOR EACH ROW BEGIN UPDATE "Animales" SET _Duplication_Index = (SELECT DISTINCT _Duplication_Index FROM (SELECT DISTINCT _Duplication_Index, "FechaHora Registro" FROM "Animales", json_each("Animales".Identificadores) WHERE json_valid("Animales".Identificadores) AND INSTR(NEW.Identificadores_str, json_each.value) > 0 AND ("Salida YN" == 0 OR "Salida YN" IS NULL)) WHERE "FechaHora Registro" == (SELECT MIN("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM "Animales", json_each("Animales".Identificadores) WHERE json_valid("Animales".Identificadores) AND  INSTR(NEW.Identificadores_str, json_each.value) > 0 AND ("Salida YN" == 0 OR "Salida YN" IS NULL)))) WHERE "Animales".ROWID IN (SELECT "ID_Animal" FROM (SELECT DISTINCT "ID_Animal", "FechaHora Registro" FROM "Animales", json_each("Animales".Identificadores) WHERE json_valid("Animales".Identificadores) AND INSTR(NEW.Identificadores_str, json_each.value) > 0 AND ("Salida YN" == 0 OR "Salida YN" IS NULL) AND "FechaHora Registro" >= (SELECT MIN("FechaHora Registro") FROM (SELECT DISTINCT "FechaHora Registro" FROM "Animales", json_each("Animales".Identificadores) WHERE json_valid("Animales".Identificadores) AND INSTR(NEW.Identificadores_str, json_each.value) > 0 AND ("Salida YN" == 0 OR "Salida YN" IS NULL))))); UPDATE _sys_Trigger_Tables SET TimeStamp = NEW."FechaHora Registro" WHERE Trigger_Name == "Trigger_Animales_INSERT" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID; END; 
+
+CREATE TRIGGER IF NOT EXISTS "Trigger_Animales Registro De Actividades_INSERT" AFTER INSERT ON "Animales Registro De Actividades" FOR EACH ROW 
+WHEN NEW.Terminal_ID IS NOT NULL AND NEW.Terminal_ID != (SELECT Terminal_ID FROM _sys_terminal_id LIMIT 1) 
+BEGIN 
+
+UPDATE _sys_Trigger_Tables SET TimeStamp = NEW."FechaHora Registro" WHERE Trigger_Name == "Trigger_Animales Registro De Actividades_INSERT" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID; 
+
+UPDATE _sys_Trigger_Tables SET "Updated_By" = json_set("Updated_By", "$[#]", NEW."ID_Clase De Animal") WHERE Trigger_Name == "Trigger_Animales Registro De Actividades_INSERT" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID AND (SELECT _sys_Trigger_Tables."Updated_By" FROM _sys_Trigger_Tables, json_each(_sys_Trigger_Tables."Updated_By") WHERE _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID AND Trigger_Name == "Trigger_Animales Registro De Actividades_INSERT" AND json_valid(_sys_Trigger_Tables."Updated_By") AND INSTR(CAST(json_each.json AS TEXT), NEW."ID_Clase De Animal") == 0 ) > 0; 
+
+END; 
+
+
+
+# Replication Trigger for Animales Registro De Actividades.
+CREATE TRIGGER IF NOT EXISTS "Trigger_Animales Registro De Actividades_INSERT" AFTER INSERT ON "Animales Registro De Actividades" FOR EACH ROW 
+WHEN NEW.Terminal_ID IS NOT NULL AND NEW.Terminal_ID != (SELECT Terminal_ID FROM _sys_terminal_id LIMIT 1) 
+BEGIN 
+
+UPDATE _sys_Trigger_Tables SET TimeStamp = NEW."FechaHora Registro" WHERE Trigger_Name == "Trigger_Animales Registro De Actividades_INSERT" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID; 
+
+UPDATE _sys_Trigger_Tables SET "Updated_By" = json_set(IFNULL((SELECT "Updated_By" FROM _sys_Trigger_Tables WHERE Trigger_Name == "Trigger_Animales Registro De Actividades_INSERT" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID 
+AND json_valid((SELECT "Updated_By" FROM _sys_Trigger_Tables WHERE Trigger_Name == "Trigger_Animales Registro De Actividades_INSERT" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID))
+AND json_type((SELECT "Updated_By" FROM _sys_Trigger_Tables WHERE Trigger_Name == "Trigger_Animales Registro De Actividades_INSERT" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID)) == 'array'), '[]'), "$[#]", NEW."ID_Clase De Animal") 
+WHERE Trigger_Name == "Trigger_Animales Registro De Actividades_INSERT" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID 
+AND  NEW."ID_Clase De Animal" NOT IN (SELECT json_each.value FROM _sys_Trigger_Tables, json_each(_sys_Trigger_Tables."Updated_By") WHERE _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID AND Trigger_Name == "Trigger_Animales Registro De Actividades_INSERT" AND json_valid(json_each.json));
+
+END; 
+
+# One-liner
+CREATE TRIGGER IF NOT EXISTS "Trigger_Animales Registro De Actividades_INSERT" AFTER INSERT ON "Animales Registro De Actividades" FOR EACH ROW WHEN NEW.Terminal_ID IS NOT NULL AND NEW.Terminal_ID != (SELECT Terminal_ID FROM _sys_terminal_id LIMIT 1) BEGIN UPDATE _sys_Trigger_Tables SET TimeStamp = NEW."FechaHora Registro" WHERE Trigger_Name == "Trigger_Animales Registro De Actividades_INSERT" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID; UPDATE _sys_Trigger_Tables SET "Updated_By" = json_set(IFNULL((SELECT "Updated_By" FROM _sys_Trigger_Tables WHERE Trigger_Name == "Trigger_Animales Registro De Actividades_INSERT" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID AND json_valid((SELECT "Updated_By" FROM _sys_Trigger_Tables WHERE Trigger_Name == "Trigger_Animales Registro De Actividades_INSERT" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID)) AND json_type((SELECT "Updated_By" FROM _sys_Trigger_Tables WHERE Trigger_Name == "Trigger_Animales Registro De Actividades_INSERT" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID)) == 'array'), '[]'), "$[#]", NEW."ID_Clase De Animal") WHERE Trigger_Name == "Trigger_Animales Registro De Actividades_INSERT" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID AND  NEW."ID_Clase De Animal" NOT IN (SELECT json_each.value FROM _sys_Trigger_Tables, json_each(_sys_Trigger_Tables."Updated_By") WHERE _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID AND Trigger_Name == "Trigger_Animales Registro De Actividades_INSERT" AND json_valid(json_each.json)); END; 
+
+
+# END NEW TRIGGERS
+
+
+
+
+
+
+
+
+
+
+
+# Trigger_Animales Registro De Actividades_INSERT - Old version. To be validated now.
+CREATE TRIGGER IF NOT EXISTS "Trigger_Animales Registro De Actividades_INSERT" AFTER INSERT ON "Animales Registro De Actividades" FOR EACH ROW 
+WHEN NEW.Terminal_ID IS NOT NULL AND NEW.Terminal_ID != (SELECT Terminal_ID FROM _sys_terminal_id LIMIT 1) 
+BEGIN 
+UPDATE _sys_Trigger_Tables SET TimeStamp = NEW."FechaHora Registro" WHERE DB_Table_Name == "Animales Registro De Actividades" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID; 
+UPDATE _sys_Trigger_Tables SET "Updated_By" = json_set("Updated_By", "$[#]", NEW."ID_Clase De Animal") WHERE DB_Table_Name == "Animales Registro De Actividades" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID AND (SELECT _sys_Trigger_Tables."Updated_By" FROM _sys_Trigger_Tables, json_each(_sys_Trigger_Tables."Updated_By") WHERE _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID AND DB_Table_Name == "Animales Registro De Actividades" AND json_valid(_sys_Trigger_Tables."Updated_By") AND INSTR(CAST(json_each.json AS TEXT), NEW."ID_Clase De Animal") == 0 ) > 0; 
+END; 
+
+ ---> INSTR(CAST(json_each.json AS TEXT), NEW."ID_Clase De Animal") == 0    # ---> This is just to avoid repetition of ID_Clase De Animal number in the JSON list. the INSTR() Function returns 0 if NEW."ID_Clase De Animal" value is not present in the JSON list (Equivalent to a set() in Python).
+ 
+ 
+ 
+# Old "Trigger_Animales Registro De Actividades_INSERT", version 2 (19-Jun)
+ 
+CREATE TRIGGER IF NOT EXISTS "Trigger_Animales Registro De Actividades_INSERT" AFTER INSERT ON "Animales Registro De Actividades" FOR EACH ROW 
+WHEN NEW.Terminal_ID IS NOT NULL AND NEW.Terminal_ID != (SELECT Terminal_ID FROM _sys_terminal_id LIMIT 1) 
+BEGIN 
+
+UPDATE _sys_Trigger_Tables SET TimeStamp = NEW."FechaHora Registro" WHERE Trigger_Name == "Trigger_Animales Registro De Actividades_INSERT" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID; 
+
+UPDATE _sys_Trigger_Tables SET "Updated_By" = json_set(IFNULL((SELECT "Updated_By" FROM _sys_Trigger_Tables WHERE Trigger_Name == "Trigger_Animales Registro De Actividades_INSERT" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID), "[]"), "$[#]", NEW."ID_Clase De Animal") 
+WHERE Trigger_Name == "Trigger_Animales Registro De Actividades_INSERT" AND _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID 
+AND (SELECT _sys_Trigger_Tables."Updated_By" FROM _sys_Trigger_Tables, json_each(_sys_Trigger_Tables."Updated_By") WHERE _sys_Trigger_Tables.ROWID == _sys_Trigger_Tables.Flag_ROWID AND Trigger_Name == "Trigger_Animales Registro De Actividades_INSERT" AND json_valid(_sys_Trigger_Tables."Updated_By") AND INSTR(CAST(json_each.json AS TEXT), NEW."ID_Clase De Animal") == 0 ); 
+
+END; 
+
+ 
+ 
+ 

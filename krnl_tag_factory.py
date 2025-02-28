@@ -1,16 +1,11 @@
 from krnl_abstract_base_classes import AbstractFactoryBaseClass
-from krnl_config import lineNum, callerFunction, valiDate, obj_dtError, obj_dtBlank, os, datetime, \
-    fDateTime, singleton
+from krnl_config import lineNum, callerFunction, valiDate, singleton
 
 from krnl_custom_types import setupArgs
 from krnl_bovine_activity import BovineActivity, AnimalActivity
 from krnl_tag import Tag           # Se tiene que importar esta clase porque se invoca el constructor
 from krnl_caprine import Caprine                # Se tiene que importar esta clase porque se invoca el constructor
 # from krnl_tag_caprine import TagCaprine         # Se tiene que importar esta clase porque se invoca el constructor
-
-
-def moduleName():
-    return str(os.path.basename(__file__))
 
 
 class TagFactory(AbstractFactoryBaseClass):    # Concrete Factory #1: Concrete Factory inicial.
@@ -62,7 +57,7 @@ tag_factory.register_object()
 @singleton
 class TagBovineFactory(TagFactory):       # Concrete Factory #2. TODO: Se va a instanciar 1 solo objeto de esta clase,
     def __init__(self):
-        super().__init__('Vacuno')
+        super().__init__('Bovine')
 
     @classmethod
     def create_tag(cls, **kwargs):

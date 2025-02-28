@@ -1,11 +1,10 @@
 from krnl_config import *
 from krnl_db_access import SqliteQueueDatabase
-from krnl_sqlite import *           # getTblName, getFldName estan aqui!!
-
+from krnl_db_query import getTblName, getFldName
 
 TIMEOUT_READ = 2
 TIMEOUT_WRT = 2    # En segundos. Tiempo que el caller espera a que se complete la operacion antes de abortar.
-writeObj = SqliteQueueDatabase(MAIN_DB_NAME)  # Asynchronous write object for setRecord() function. This is a singleton.
+writeObj = SqliteQueueDatabase(db_name=MAIN_DB_NAME)  # Asynchronous write object for setRecord() function. Singleton.
 
 def moduleName():
     return str(os.path.basename(__file__))
