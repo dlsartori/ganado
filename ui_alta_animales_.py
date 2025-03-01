@@ -173,6 +173,7 @@ class DialogAltaAnimales(QtWidgets.QDialog, Ui_dlgIngresoAnimales):
 
 
 class DialogAltaAnimalesAdic(QtWidgets.QDialog, Ui_dlgIngresoAnimalesAdic):
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setupUi(self)
@@ -183,6 +184,7 @@ class DialogAltaAnimalesAdic(QtWidgets.QDialog, Ui_dlgIngresoAnimalesAdic):
 
 
 class DialogAltaAnimalesCaravanas(QtWidgets.QDialog, Ui_dlgIngresoAnimalesCaravanas):
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setupUi(self)
