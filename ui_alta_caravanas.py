@@ -12,8 +12,8 @@ from krnl_tag_tech_classes import *
 from krnl_bovine import Bovine
 import krnl_tag_animal
 
-class UiAltaCaravanas():
 
+class UiAltaCaravanas():
 
     def __init__(self, parent=None):
 

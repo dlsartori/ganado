@@ -13,7 +13,6 @@ from krnl_db_query import SQLiteQuery
 from krnl_custom_types import getRecords, getrecords
 from krnl_abstract_class_animal import Animal
 from krnl_bovine import Bovine
-
 from krnl_custom_types import DataTable, getRecords, dbRead
 
 
