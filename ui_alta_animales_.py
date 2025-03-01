@@ -13,11 +13,11 @@ from krnl_db_query import SQLiteQuery
 from krnl_custom_types import getRecords, getrecords
 from krnl_abstract_class_animal import Animal
 from krnl_bovine import Bovine
+
 from krnl_custom_types import DataTable, getRecords, dbRead
 
 
 class UiAltaAnimales():
-
     def __init__(self, parent=None):
 
         app = QtWidgets.QApplication(sys.argv)
@@ -43,7 +43,6 @@ class UiAltaAnimales():
 
 
 class DialogAltaAnimales(QtWidgets.QDialog, Ui_dlgIngresoAnimales):
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setupUi(self)
@@ -174,7 +173,6 @@ class DialogAltaAnimales(QtWidgets.QDialog, Ui_dlgIngresoAnimales):
 
 
 class DialogAltaAnimalesAdic(QtWidgets.QDialog, Ui_dlgIngresoAnimalesAdic):
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setupUi(self)
@@ -185,7 +183,6 @@ class DialogAltaAnimalesAdic(QtWidgets.QDialog, Ui_dlgIngresoAnimalesAdic):
 
 
 class DialogAltaAnimalesCaravanas(QtWidgets.QDialog, Ui_dlgIngresoAnimalesCaravanas):
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setupUi(self)
