@@ -17,6 +17,7 @@ from krnl_custom_types import DataTable, getRecords, dbRead
 
 
 class UiAltaAnimales():
+
     def __init__(self, parent=None):
 
         app = QtWidgets.QApplication(sys.argv)
